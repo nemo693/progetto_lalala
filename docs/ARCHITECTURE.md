@@ -25,7 +25,7 @@
         v
 +------------------------------------------------------+
 |                   Data Layer                         |
-|  Mapbox Tiles | WMS Responses | Local MBTiles | GPS  |
+|  OpenFreeMap Tiles | WMS Responses | Local MBTiles | GPS |
 +------------------------------------------------------+
 ```
 
@@ -33,24 +33,25 @@
 
 ### MapProvider Interface
 
-The `MapService` wraps the Mapbox SDK behind an interface. This allows:
+The `MapService` wraps the map SDK behind a `MapProvider` interface. This allows:
 - Testing without a real map
-- Future migration to MapLibre when it supports mobile 3D terrain
+- Swapping MapLibre (2D, Phases 1–4) for Mapbox (3D, Phase 5) without rewriting the app
 - Clean separation between map rendering and business logic
 
+The active implementation is `MapLibreProvider` which wraps MapLibre GL.
+
 ```dart
-// Conceptual interface (not final API)
 abstract class MapProvider {
-  Future<void> initialize(String accessToken);
-  void setCenter(double lat, double lng, double zoom);
-  void addGeoJsonLayer(String id, Map<String, dynamic> geojson);
-  void removeLayer(String id);
-  Future<void> downloadRegion(BoundingBox bbox, int minZoom, int maxZoom);
+  Future<void> setCamera({...});
+  Future<void> addTrackLayer(String id, List<List<double>> coordinates);
+  Future<void> removeLayer(String id);
+  Future<void> updateLocationMarker({...});
+  Future<void> resetNorth();
   void dispose();
 }
 ```
 
-In practice, the Mapbox Flutter SDK uses a widget-based approach (`MapWidget`), so the abstraction will be at the service/controller level rather than wrapping the widget itself.
+The MapLibre Flutter SDK uses a widget-based approach (`MapLibreMap`). The `MapLibreProvider` operates on the `MapLibreMapController` exposed via the widget's `onMapCreated` callback.
 
 ### Offline-First Data Flow
 
@@ -58,7 +59,7 @@ In practice, the Mapbox Flutter SDK uses a widget-based approach (`MapWidget`), 
 User requests map area
   -> Check local MBTiles cache
     -> Cache hit: serve tile from SQLite
-    -> Cache miss + online: fetch from Mapbox, store in cache, serve
+    -> Cache miss + online: fetch from tile server, store in cache, serve
     -> Cache miss + offline: show placeholder or cached lower zoom
 ```
 
@@ -79,13 +80,14 @@ User enables orthophoto layer
 - Single file per region, easy to manage
 - SQLite is reliable on mobile
 - Standard format, compatible with QGIS and other tools
-- Mapbox SDK has built-in offline support, but custom MBTiles gives us control over WMS caching
+- MapLibre supports MBTiles as a local tile source
+- Custom MBTiles gives us control over WMS caching and offline management
 
 **Storage structure**:
 ```
 app_data/
   tiles/
-    base_map/          # Mapbox vector tiles (managed by SDK)
+    base_map/          # Vector tiles cached from OpenFreeMap
     orthophoto/        # Cached WMS raster tiles
       veneto_2024.mbtiles
       trentino_2024.mbtiles
@@ -127,7 +129,7 @@ GPX is the interchange format. Internally, routes are stored in SQLite for fast 
 
 | Package | Purpose |
 |---------|---------|
-| `mapbox_maps_flutter` | Map rendering, vector tiles, 3D terrain |
+| `maplibre_gl` | Map rendering, vector tiles (2D) |
 | `geolocator` | GPS position stream |
 | `gpx` | GPX file parsing and generation |
 | `path_provider` | Access to app storage directories |
@@ -140,7 +142,7 @@ GPX is the interchange format. Internally, routes are stored in SQLite for fast 
 Flutter is single-threaded (event loop). Heavy operations use:
 - **Isolates** for GPX parsing of large files
 - **Async/await** for network requests and database queries
-- The Mapbox SDK handles its own rendering thread
+- The MapLibre SDK handles its own rendering thread
 
 ## Error Handling
 

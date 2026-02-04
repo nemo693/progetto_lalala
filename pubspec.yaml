@@ -11,8 +11,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Mapping
-  mapbox_maps_flutter: ^2.17.0
+  # Mapping — MapLibre for 2D (Phases 1–4), Mapbox for 3D only (Phase 5)
+  maplibre_gl: ^0.25.0
 
   # Location
   geolocator: ^14.0.1
