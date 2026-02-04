@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show Point;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
@@ -96,7 +97,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _onCameraIdle() {
-    // User panned manually — stop auto-following
+    // Recalculate accuracy circle size for new zoom level
+    _mapProvider.onCameraIdle();
   }
 
   void _zoomToLocation() async {

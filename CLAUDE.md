@@ -147,23 +147,37 @@ Mapbox tokens (Phase 5 only) go in:
 
 ## Current Status & Next Steps
 
-### What's done (Phase 1 code — not yet build-tested)
-- `pubspec.yaml`: MapLibre GL (`maplibre_gl: ^0.25.0`) replaces Mapbox
-- `lib/services/map_service.dart`: `MapProvider` interface + `MapLibreProvider` implementation (camera, track layers, location marker, reset north)
+### What's done (Phase 1 — analyze-clean, needs device test)
+- `pubspec.yaml`: MapLibre GL (`maplibre_gl: ^0.25.0`) + geolocator, permission_handler, file_picker
+- `lib/services/map_service.dart`: `MapProvider` interface + `MapLibreProvider` implementation (camera, track layers, location marker with zoom-dependent accuracy circle, reset north). Fallback style URL added (`demotiles.maplibre.org`).
 - `lib/services/location_service.dart`: Full implementation (permission flow, one-shot position, streaming GPS, configurable accuracy)
-- `lib/screens/map_screen.dart`: Full-screen MapLibre map with OpenFreeMap bright tiles, GPS blue dot with accuracy circle, reset-north button, zoom-to-location button, coordinate/altitude chip, error banner for permission issues. Default camera on Dolomites (46.5, 11.35)
+- `lib/screens/map_screen.dart`: Full-screen MapLibre map with OpenFreeMap bright tiles, GPS blue dot with zoom-corrected accuracy circle, reset-north button, zoom-to-location button, coordinate/altitude chip, error banner for permission issues. Default camera on Dolomites (46.5, 11.35)
 - `scripts/setup_env.sh`: Cloud env setup (Flutter install, android scaffold, pub get — no tokens needed)
-- `.claude/settings.json`: SessionStart hook wired up
-- All docs updated to reflect MapLibre + OpenFreeMap
+- `android/app/src/main/AndroidManifest.xml`: Location permissions (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`) and `INTERNET` permission present
+- `test/widget_test.dart`: Basic smoke test (app creates without error) — passes
+- `flutter analyze`: **0 issues**
+- `flutter test`: **All tests passed**
+
+### Build-test status
+- `flutter analyze` — clean (0 issues)
+- `flutter test` — all tests passed
+- `flutter build apk` — **not yet run** (no Android SDK in cloud environment). Must be tested locally or in an environment with Android SDK installed.
+
+### What's been fixed since initial code
+1. **Accuracy circle**: `CircleOptions.circleRadius` was receiving meters instead of pixels. Added `metersToPixels()` static method with ground-resolution formula. Accuracy circle now recalculates on zoom via `onCameraIdle()`.
+2. **Missing `dart:math` import**: `Point` class needed explicit import from `dart:math` in `map_screen.dart`.
+3. **Test file**: Default `widget_test.dart` referenced non-existent `MyApp` — replaced with `AlpineNavApp` smoke test.
+4. **Tile source fallback**: Added `MapLibreProvider.fallbackStyleUrl` pointing to `demotiles.maplibre.org/style.json`.
 
 ### What needs to happen next
-1. **Build-test Phase 1**: Run in a cloud session with Flutter available (or locally). The code has not been compiled yet. Expect possible API mismatches with `maplibre_gl` — the circle annotation API in particular may need adjustment.
-2. **Android scaffold**: `flutter create --org com.alpinenav --project-name alpinenav --platforms android .` must be run before building. The setup script handles this in cloud sessions. Locally the developer runs it once.
-3. **Android permissions**: `AndroidManifest.xml` needs `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`. MapLibre may add these automatically, but verify after scaffold generation.
-4. **Kotlin version**: `maplibre_gl` requires Kotlin 2.1.0+. May need to update `android/settings.gradle` after scaffold generation.
-5. **Known risks**:
-   - `CircleOptions.circleRadius` in MapLibre GL uses screen pixels, not meters. The accuracy circle will need conversion from meters to pixels at the current zoom level. This will need fixing after first visual test.
-   - OpenFreeMap `bright` style URL may not resolve (was 403 during doc fetch). Fallback: `https://tiles.openfreemap.org/styles/dark` or `https://demotiles.maplibre.org/style.json`.
+1. **Build APK locally**: Run `flutter build apk --debug` with Android SDK available. This is the first real compile — expect possible native plugin issues.
+2. **Test on device**: Install APK on an Android device/emulator. Verify:
+   - Map loads with OpenFreeMap bright tiles (if 403, switch to `fallbackStyleUrl` in `map_screen.dart`)
+   - GPS blue dot appears at correct location
+   - Accuracy circle scales correctly when zooming in/out
+   - Reset-north and zoom-to-location buttons work
+   - Coordinate chip shows lat/lon/altitude
+3. **Proceed to Phase 2**: GPX import/display. The stubs and `addTrackLayer()` are ready.
 
 ### Phase 2 readiness
 - `lib/models/route.dart` and `lib/models/waypoint.dart` are stubs with field specs documented
