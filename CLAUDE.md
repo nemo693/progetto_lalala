@@ -111,6 +111,9 @@ lib/
     waypoint.dart              # Waypoint data model
   utils/
     tile_calculator.dart       # Tile math (bbox to tile indices, etc.)
+scripts/
+  setup_env.sh                 # Cloud environment setup (Flutter + Android SDK + Gradle proxy)
+  gradle_proxy.py              # Local proxy for Gradle in cloud environments
 docs/
   ARCHITECTURE.md              # Technical architecture
   DATA_SOURCES.md              # Italian geoportal endpoints
@@ -152,7 +155,8 @@ Mapbox tokens (Phase 5 only) go in:
 - `lib/services/map_service.dart`: `MapProvider` interface + `MapLibreProvider` implementation (camera, track layers, location marker with zoom-dependent accuracy circle, reset north). Fallback style URL added (`demotiles.maplibre.org`).
 - `lib/services/location_service.dart`: Full implementation (permission flow, one-shot position, streaming GPS, configurable accuracy)
 - `lib/screens/map_screen.dart`: Full-screen MapLibre map with OpenFreeMap bright tiles, GPS blue dot with zoom-corrected accuracy circle, reset-north button, zoom-to-location button, coordinate/altitude chip, error banner for permission issues. Default camera on Dolomites (46.5, 11.35)
-- `scripts/setup_env.sh`: Cloud env setup (Flutter install, android scaffold, pub get — no tokens needed)
+- `scripts/setup_env.sh`: Cloud env setup (Flutter install, Android SDK install, Gradle proxy, android scaffold, pub get — no tokens needed)
+- `scripts/gradle_proxy.py`: Local forwarding proxy for Gradle in cloud environments (Java can't auth with container proxy)
 - `android/app/src/main/AndroidManifest.xml`: Location permissions (`ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`) and `INTERNET` permission present
 - `test/widget_test.dart`: Basic smoke test (app creates without error) — passes
 - `flutter analyze`: **0 issues**
@@ -160,8 +164,8 @@ Mapbox tokens (Phase 5 only) go in:
 
 ### Build-test status
 - `flutter analyze` — clean (0 issues)
-- `flutter test` — all tests passed
-- `flutter build apk` — **not yet run** (no Android SDK in cloud environment). Must be tested locally or in an environment with Android SDK installed.
+- `flutter test` — 18 tests passed
+- `flutter build apk --debug` — **builds successfully** (181MB debug APK). Requires Android SDK setup (automated by `scripts/setup_env.sh`).
 
 ### What's been fixed since initial code
 1. **Accuracy circle**: `CircleOptions.circleRadius` was receiving meters instead of pixels. Added `metersToPixels()` static method with ground-resolution formula. Accuracy circle now recalculates on zoom via `onCameraIdle()`.
@@ -170,14 +174,13 @@ Mapbox tokens (Phase 5 only) go in:
 4. **Tile source fallback**: Added `MapLibreProvider.fallbackStyleUrl` pointing to `demotiles.maplibre.org/style.json`.
 
 ### What needs to happen next
-1. **Build APK locally**: Run `flutter build apk --debug` with Android SDK available. This is the first real compile — expect possible native plugin issues.
-2. **Test on device**: Install APK on an Android device/emulator. Verify:
+1. **Test on device**: Install APK on an Android device/emulator. Verify:
    - Map loads with OpenFreeMap bright tiles (if 403, switch to `fallbackStyleUrl` in `map_screen.dart`)
    - GPS blue dot appears at correct location
    - Accuracy circle scales correctly when zooming in/out
    - Reset-north and zoom-to-location buttons work
    - Coordinate chip shows lat/lon/altitude
-3. **Proceed to Phase 2**: GPX import/display. The stubs and `addTrackLayer()` are ready.
+2. **Proceed to Phase 3**: Offline tile download. Phase 2 (GPX import/export, route display, track recording) is implemented.
 
 ### Phase 2 readiness
 - `lib/models/route.dart` and `lib/models/waypoint.dart` are stubs with field specs documented
