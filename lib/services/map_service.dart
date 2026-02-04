@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show Offset;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 /// Abstract interface for map operations.
@@ -22,6 +23,13 @@ abstract class MapProvider {
 
   /// Remove a previously added layer.
   Future<void> removeLayer(String id);
+
+  /// Add waypoint markers to the map.
+  Future<void> addWaypointMarkers(
+      String id, List<Map<String, dynamic>> waypoints);
+
+  /// Remove waypoint markers.
+  Future<void> removeWaypointMarkers(String id);
 
   /// Add or update the user location circle (accuracy indicator).
   Future<void> updateLocationMarker({
@@ -147,6 +155,55 @@ class MapLibreProvider implements MapProvider {
     await c.removeSource(id);
   }
 
+  // Track symbols added for waypoint markers
+  final Map<String, List<Symbol>> _waypointSymbols = {};
+
+  @override
+  Future<void> addWaypointMarkers(
+      String id, List<Map<String, dynamic>> waypoints) async {
+    final c = _controller;
+    if (c == null) return;
+
+    // Remove existing markers for this id
+    await removeWaypointMarkers(id);
+
+    final symbols = <Symbol>[];
+    for (final wpt in waypoints) {
+      final lat = wpt['lat'] as double;
+      final lon = wpt['lon'] as double;
+      final name = wpt['name'] as String? ?? '';
+
+      final symbol = await c.addSymbol(
+        SymbolOptions(
+          geometry: LatLng(lat, lon),
+          textField: name,
+          textSize: 12,
+          textColor: '#FFFFFF',
+          textHaloColor: '#000000',
+          textHaloWidth: 1,
+          textOffset: const Offset(0, 1.5),
+          iconImage: 'marker-15', // MapLibre default marker icon
+          iconSize: 1.5,
+        ),
+      );
+      symbols.add(symbol);
+    }
+    _waypointSymbols[id] = symbols;
+  }
+
+  @override
+  Future<void> removeWaypointMarkers(String id) async {
+    final c = _controller;
+    if (c == null) return;
+
+    final symbols = _waypointSymbols.remove(id);
+    if (symbols != null) {
+      for (final s in symbols) {
+        await c.removeSymbol(s);
+      }
+    }
+  }
+
   @override
   Future<void> updateLocationMarker({
     required double latitude,
@@ -232,5 +289,6 @@ class MapLibreProvider implements MapProvider {
     _accuracyCircle = null;
     _lastAccuracyMeters = null;
     _lastLat = null;
+    _waypointSymbols.clear();
   }
 }
