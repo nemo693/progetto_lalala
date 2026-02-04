@@ -39,7 +39,7 @@ http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12
 **Notes**:
 - Server can be slow; implement timeouts and retries
 - JPEG preferred over PNG for orthophotos (smaller, no transparency needed)
-- Request in EPSG:3857 to match Mapbox tile grid directly
+- Request in EPSG:3857 to match Web Mercator tile grid directly
 
 ## Regional Geoportals
 
@@ -126,7 +126,7 @@ Higher resolution available from regional geoportals:
 
 ### Conversion strategy
 
-All data must be served to Mapbox in **EPSG:3857** (Web Mercator) for raster tiles, or **EPSG:4326** for GeoJSON.
+All data must be served to MapLibre in **EPSG:3857** (Web Mercator) for raster tiles, or **EPSG:4326** for GeoJSON.
 
 For WMS requests:
 1. Compute the tile's bounding box in EPSG:3857
@@ -147,7 +147,7 @@ Most Italian WMS endpoints support EPSG:3857 in addition to their native CRS. Al
 
 ### WMS to tile conversion
 
-To use WMS data as a tile layer in Mapbox:
+To use WMS data as a tile layer in MapLibre:
 
 1. For each visible tile (z/x/y), compute its bounding box in EPSG:3857
 2. Send a WMS GetMap request for that bbox at 256x256 or 512x512 pixels

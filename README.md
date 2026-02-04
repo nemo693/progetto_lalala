@@ -2,7 +2,7 @@
 
 Offline-first outdoor navigation for skitouring, hiking, and climbing in the Alps.
 
-Built with Flutter and Mapbox Maps SDK. Android only (for now).
+Built with Flutter and MapLibre GL. Android only (for now).
 
 <!-- TODO: screenshots -->
 
@@ -11,7 +11,7 @@ Built with Flutter and Mapbox Maps SDK. Android only (for now).
 - Offline map downloads (MBTiles)
 - GPX import/export and track recording
 - Italian regional orthophotos via WMS
-- 3D terrain visualization
+- 3D terrain visualization (Mapbox, Phase 5)
 - Minimal, gloves-friendly UI
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full feature plan.
@@ -20,7 +20,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full feature plan.
 
 - Flutter SDK >= 3.27.0
 - Android Studio (for Android SDK and emulator)
-- Mapbox account with access token
+- No API keys needed for Phases 1–4 (MapLibre + OpenFreeMap are fully open)
 
 ## Setup
 
@@ -29,22 +29,15 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full feature plan.
 git clone <repo-url>
 cd alpinenav
 
+# Generate Android scaffold (if not present)
+flutter create --org com.alpinenav --project-name alpinenav --platforms android .
+
 # Install dependencies
 flutter pub get
-
-# Configure Mapbox token (see below)
 
 # Run
 flutter run
 ```
-
-### Mapbox Access Token
-
-1. Create an account at https://account.mapbox.com/
-2. Create an access token with the default scopes plus `DOWNLOADS:READ`
-3. Configure the token for the SDK — see [Mapbox Flutter installation guide](https://docs.mapbox.com/android/maps/guides/install/)
-
-The token must be available at build time. Do NOT commit it to the repo.
 
 ## Building
 
@@ -69,13 +62,15 @@ docs/
   ARCHITECTURE.md        # Technical architecture
   DATA_SOURCES.md        # Italian geoportal endpoints
   ROADMAP.md             # Feature roadmap
+scripts/
+  setup_env.sh           # Cloud environment setup (Claude Code on the web)
 ```
 
 ## Architecture
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-The mapping layer is abstracted behind a `MapProvider` interface to allow future migration from Mapbox to MapLibre when mobile 3D terrain support matures.
+The mapping layer is abstracted behind a `MapProvider` interface. The active implementation uses MapLibre GL (open source, no API keys). A Mapbox implementation will be added in Phase 5 for 3D terrain, swappable without touching the rest of the app.
 
 ## License
 

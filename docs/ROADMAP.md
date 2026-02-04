@@ -4,13 +4,13 @@
 
 **Goal**: A working app that displays a map and shows your location.
 
-- [ ] Flutter project initialization and Mapbox SDK setup
-- [ ] Display Mapbox Streets base map (full screen)
-- [ ] GPS location display with accuracy circle
-- [ ] Basic map controls: pinch zoom, pan, rotate
-- [ ] Compass button (reset to north)
-- [ ] Zoom to current location button
-- [ ] Coordinate display (current center or GPS position)
+- [x] Flutter project initialization and MapLibre SDK setup
+- [x] Display base map via MapLibre + OpenFreeMap (full screen)
+- [x] GPS location display with accuracy circle
+- [x] Basic map controls: pinch zoom, pan, rotate
+- [x] Compass/north button (reset to north)
+- [x] Zoom to current location button
+- [x] Coordinate display (GPS position + altitude)
 
 **Done when**: You can install the app, see a map, and see your blue dot moving.
 
@@ -62,10 +62,11 @@
 
 **Done when**: You can switch to orthophoto view, see real aerial imagery, and it works offline after downloading.
 
-## Phase 5 — 3D Terrain
+## Phase 5 — 3D Terrain (Mapbox)
 
 **Goal**: Terrain visualization for route planning and awareness.
 
+- [ ] Add Mapbox SDK alongside MapLibre (MapboxProvider behind MapProvider interface)
 - [ ] Enable Mapbox terrain-RGB (hillshade + 3D extrusion)
 - [ ] Terrain exaggeration slider
 - [ ] Pitch/tilt gesture for 3D viewing angle

@@ -1,13 +1,12 @@
 #!/bin/bash
 # AlpineNav cloud environment setup
 # Runs as a SessionStart hook in Claude Code on the web.
-# Installs Flutter, configures Mapbox tokens, and prepares the project.
+# Installs Flutter and prepares the project for building.
 #
-# Required environment variables (set in Claude Code web UI):
-#   MAPBOX_ACCESS_TOKEN   - public token (pk.xxx) for runtime map rendering
-#   MAPBOX_DOWNLOADS_TOKEN - secret token (sk.xxx) with DOWNLOADS:READ scope
+# MapLibre + OpenFreeMap require no API keys or tokens.
+# Mapbox tokens are only needed in Phase 5 (3D terrain).
 #
-# On local machines this script exits immediately (local devs manage their own env).
+# On local machines this script exits immediately.
 
 set -e
 
@@ -33,43 +32,12 @@ if ! command -v flutter &> /dev/null; then
   echo "Flutter installed: $(flutter --version --machine | head -1)"
 else
   echo "Flutter already available: $(flutter --version --machine | head -1)"
-  # Ensure PATH is persisted even if Flutter was pre-installed
   if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo "PATH=$(dirname "$(which flutter)"):$PATH" >> "$CLAUDE_ENV_FILE"
   fi
 fi
 
-# ── 2. Configure Mapbox secret token for Gradle downloads ──────────────────
-# The Mapbox Maps SDK for Android requires a secret token with DOWNLOADS:READ
-# scope to download the SDK artifacts from Mapbox's Maven repository.
-if [ -n "$MAPBOX_DOWNLOADS_TOKEN" ]; then
-  echo "Configuring Mapbox downloads token in gradle.properties..."
-  mkdir -p "$HOME/.gradle"
-  # Remove any existing entry, then append
-  if [ -f "$HOME/.gradle/gradle.properties" ]; then
-    sed -i '/MAPBOX_DOWNLOADS_TOKEN/d' "$HOME/.gradle/gradle.properties"
-  fi
-  echo "MAPBOX_DOWNLOADS_TOKEN=$MAPBOX_DOWNLOADS_TOKEN" >> "$HOME/.gradle/gradle.properties"
-else
-  echo "WARNING: MAPBOX_DOWNLOADS_TOKEN not set. Mapbox SDK download will fail."
-  echo "  Set it in your Claude Code environment variables."
-fi
-
-# ── 3. Configure Mapbox public access token for runtime ────────────────────
-if [ -n "$MAPBOX_ACCESS_TOKEN" ]; then
-  PROJ_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-  TOKEN_DIR="$PROJ_DIR/android/app/src/main/res/values"
-
-  # Only write the token file if android/ scaffold exists (created in step 4)
-  # We'll write it after flutter create if needed
-  export _ALPINENAV_WRITE_TOKEN="true"
-else
-  echo "WARNING: MAPBOX_ACCESS_TOKEN not set. Map will not render at runtime."
-  echo "  Set it in your Claude Code environment variables."
-  export _ALPINENAV_WRITE_TOKEN="false"
-fi
-
-# ── 4. Generate Android scaffold if missing ────────────────────────────────
+# ── 2. Generate Android scaffold if missing ────────────────────────────────
 PROJ_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$PROJ_DIR"
 
@@ -79,20 +47,7 @@ if [ ! -d "android" ]; then
   echo "Android scaffold created."
 fi
 
-# ── 5. Write Mapbox public token XML (after android/ exists) ───────────────
-if [ "$_ALPINENAV_WRITE_TOKEN" = "true" ]; then
-  TOKEN_DIR="$PROJ_DIR/android/app/src/main/res/values"
-  mkdir -p "$TOKEN_DIR"
-  cat > "$TOKEN_DIR/mapbox_access_token.xml" <<XMLEOF
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="mapbox_access_token" translatable="false">$MAPBOX_ACCESS_TOKEN</string>
-</resources>
-XMLEOF
-  echo "Mapbox access token written to $TOKEN_DIR/mapbox_access_token.xml"
-fi
-
-# ── 6. Install dependencies ───────────────────────────────────────────────
+# ── 3. Install dependencies ───────────────────────────────────────────────
 echo "Running flutter pub get..."
 flutter pub get
 
