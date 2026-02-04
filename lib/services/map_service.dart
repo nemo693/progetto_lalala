@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 /// Abstract interface for map operations.
@@ -46,9 +47,32 @@ class MapLibreProvider implements MapProvider {
   Circle? _locationCircle;
   Circle? _accuracyCircle;
 
-  /// Style URL — OpenFreeMap bright style (free, no API key).
+  // Stored state for recalculating accuracy circle on zoom changes
+  double? _lastAccuracyMeters;
+  double? _lastLat;
+
+  /// Convert a distance in meters to screen pixels at the given zoom and
+  /// latitude.  MapLibre CircleOptions.circleRadius is in screen pixels,
+  /// so we must do this conversion ourselves.
+  ///
+  /// Ground resolution formula:
+  ///   metersPerPixel = 156543.03392 × cos(lat × π / 180) / 2^zoom
+  static double metersToPixels(double meters, double zoom, double latitude) {
+    final metersPerPixel =
+        156543.03392 * math.cos(latitude * math.pi / 180) / math.pow(2, zoom);
+    final px = meters / metersPerPixel;
+    // Clamp to a reasonable range: at least 4px so it's visible, at most 500px
+    return px.clamp(4.0, 500.0);
+  }
+
+  /// Style URLs — OpenFreeMap bright is the primary; MapLibre demo tiles as
+  /// fallback in case OpenFreeMap is temporarily down.
   static const defaultStyleUrl =
       'https://tiles.openfreemap.org/styles/bright';
+
+  /// Fallback style URL (MapLibre demo tiles — low-res but always available).
+  static const fallbackStyleUrl =
+      'https://demotiles.maplibre.org/style.json';
 
   /// Bind to the controller after map creation.
   void attach(MapLibreMapController controller) {
@@ -132,6 +156,13 @@ class MapLibreProvider implements MapProvider {
     final c = _controller;
     if (c == null) return;
 
+    // Store for recalculation on zoom changes
+    _lastLat = latitude;
+    _lastAccuracyMeters = accuracyMeters;
+
+    final zoom = c.cameraPosition?.zoom ?? 15;
+    final radiusPx = metersToPixels(accuracyMeters, zoom, latitude);
+
     final pos = LatLng(latitude, longitude);
 
     // Remove previous circles
@@ -146,7 +177,7 @@ class MapLibreProvider implements MapProvider {
     _accuracyCircle = await c.addCircle(
       CircleOptions(
         geometry: pos,
-        circleRadius: accuracyMeters,
+        circleRadius: radiusPx,
         circleColor: '#4A90D9',
         circleOpacity: 0.15,
         circleStrokeColor: '#4A90D9',
@@ -155,7 +186,7 @@ class MapLibreProvider implements MapProvider {
       ),
     );
 
-    // Center dot
+    // Center dot (fixed 8px)
     _locationCircle = await c.addCircle(
       CircleOptions(
         geometry: pos,
@@ -166,6 +197,24 @@ class MapLibreProvider implements MapProvider {
         circleStrokeWidth: 2,
         circleStrokeOpacity: 1,
       ),
+    );
+  }
+
+  /// Recalculate the accuracy circle size for the current zoom level.
+  /// Call this from the map's onCameraIdle callback.
+  Future<void> onCameraIdle() async {
+    final c = _controller;
+    if (c == null || _accuracyCircle == null) return;
+    final lat = _lastLat;
+    final meters = _lastAccuracyMeters;
+    if (lat == null || meters == null) return;
+
+    final zoom = c.cameraPosition?.zoom ?? 15;
+    final radiusPx = metersToPixels(meters, zoom, lat);
+
+    await c.updateCircle(
+      _accuracyCircle!,
+      CircleOptions(circleRadius: radiusPx),
     );
   }
 
@@ -181,5 +230,7 @@ class MapLibreProvider implements MapProvider {
     _controller = null;
     _locationCircle = null;
     _accuracyCircle = null;
+    _lastAccuracyMeters = null;
+    _lastLat = null;
   }
 }
