@@ -173,20 +173,43 @@ Mapbox tokens (Phase 5 only) go in:
 3. **Test file**: Default `widget_test.dart` referenced non-existent `MyApp` — replaced with `AlpineNavApp` smoke test.
 4. **Tile source fallback**: Added `MapLibreProvider.fallbackStyleUrl` pointing to `demotiles.maplibre.org/style.json`.
 
-### What needs to happen next
-1. **Test on device**: Install APK on an Android device/emulator. Verify:
-   - Map loads with OpenFreeMap bright tiles (if 403, switch to `fallbackStyleUrl` in `map_screen.dart`)
-   - GPS blue dot appears at correct location
-   - Accuracy circle scales correctly when zooming in/out
-   - Reset-north and zoom-to-location buttons work
-   - Coordinate chip shows lat/lon/altitude
-2. **Proceed to Phase 3**: Offline tile download. Phase 2 (GPX import/export, route display, track recording) is implemented.
+### What's done (Phase 3 — offline tile download core)
+- `lib/utils/tile_calculator.dart`: Full implementation with:
+  - `BoundingBox` class for area definitions
+  - `TileCoord` class for tile coordinates
+  - `computeRouteBBox()` — compute bounding box from route points
+  - `computeBufferedBBox()` — expand bbox by buffer distance (for route corridors)
+  - `enumerateTileCoords()` — list all tile (x, y, z) coordinates for a bbox
+  - `estimateDownloadSize()` — estimate bytes for tile list
+  - `formatBytes()` — human-readable byte formatting
+- `lib/services/offline_manager.dart`: Full implementation with:
+  - `OfflineManager` class with MBTiles schema (SQLite)
+  - `downloadRegion()` — download tiles for bounding box with progress stream
+  - `downloadRouteRegion()` — download tiles for buffered route corridor
+  - Concurrent downloads (6 parallel requests) with timeout handling
+  - Fallback tile source (MapLibre demo tiles) if OpenFreeMap returns 403/404
+  - `cancelDownload()` — cancel ongoing download
+  - `listRegions()`, `deleteRegion()` — region management
+  - `getTotalStorageBytes()`, `getTotalTileCount()` — storage statistics
+  - `getTile()`, `isTileCached()` — tile retrieval for offline use
+  - `clearAll()` — clear all cached data
+- `DownloadProgress` class for progress reporting (tiles, bytes, percent, errors)
+- `OfflineRegion` class for region metadata (name, bounds, zoom range, size, date)
+- Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart`
 
-### Phase 2 readiness
-- `lib/models/route.dart` and `lib/models/waypoint.dart` are stubs with field specs documented
-- `lib/services/gpx_service.dart` is a stub with requirements documented
-- `lib/utils/tile_calculator.dart` has working tile math, needs route-buffer functions for Phase 3
-- `MapLibreProvider.addTrackLayer()` is implemented and ready for GPX polyline display
+### What needs to happen next
+1. **Test on device**: Install APK on an Android device/emulator. Verify Phase 1-2 features work.
+2. **Add offline download UI** (Phase 3 completion):
+   - Region selection screen (map bbox selection or route selection)
+   - Download progress overlay with cancel button
+   - Region management screen (list, delete, storage stats)
+   - Integrate cached tiles with MapLibre (custom tile source)
+3. **Proceed to Phase 4**: WMS data (Italian orthophotos)
+
+### Phase 3 remaining work
+- UI for offline region selection and download progress
+- Integration with MapLibre to serve cached tiles
+- Offline indicator on map screen
 
 ## Conventions
 
