@@ -7,7 +7,13 @@ import 'dart:math';
 
 /// Convert longitude to tile X index at a given zoom level.
 ///
-/// Clamps to valid range [0, 2^zoom - 1] to handle edge coordinates like lon=180.
+/// Clamps result to valid tile range [0, 2^zoom - 1].
+///
+/// Note: We clamp rather than wrap because this function is primarily used
+/// for bounding box tile enumeration. For a bbox from lon A to lon B, we need
+/// lonToTileX(B) >= lonToTileX(A). Wrapping lon=180 to -180 would break this.
+/// The clamp ensures lon=180 returns the easternmost tile, which is correct
+/// for "include all tiles that intersect this bbox" semantics.
 int lonToTileX(double lon, int zoom) {
   final maxTile = (1 << zoom) - 1; // 2^zoom - 1
   final x = ((lon + 180.0) / 360.0 * (1 << zoom)).floor();

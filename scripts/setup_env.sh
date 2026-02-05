@@ -19,15 +19,21 @@ echo "=== AlpineNav environment setup ==="
 
 # ── 1. Install Flutter SDK ──────────────────────────────────────────────────
 if ! command -v flutter &> /dev/null; then
-  echo "Installing Flutter SDK (stable)..."
-  git clone --depth 1 https://github.com/flutter/flutter.git -b stable "$HOME/flutter"
-  export PATH="$HOME/flutter/bin:$PATH"
+  # Flutter not in PATH - check if directory exists from previous session
+  if [ -d "$HOME/flutter" ]; then
+    echo "Flutter directory exists, adding to PATH..."
+    export PATH="$HOME/flutter/bin:$PATH"
+  else
+    echo "Installing Flutter SDK (stable)..."
+    git clone --depth 1 https://github.com/flutter/flutter.git -b stable "$HOME/flutter"
+    export PATH="$HOME/flutter/bin:$PATH"
+    flutter precache --android
+  fi
   # Persist PATH for subsequent commands in this session
   if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo "PATH=$HOME/flutter/bin:$PATH" >> "$CLAUDE_ENV_FILE"
   fi
-  flutter precache --android
-  echo "Flutter installed: $(flutter --version --machine | head -1)"
+  echo "Flutter ready: $(flutter --version --machine | head -1)"
 else
   echo "Flutter already available: $(flutter --version --machine | head -1)"
   if [ -n "$CLAUDE_ENV_FILE" ]; then
