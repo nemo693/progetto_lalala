@@ -6,17 +6,28 @@ import 'dart:math';
 // These are standard Web Mercator (EPSG:3857) tile calculations.
 
 /// Convert longitude to tile X index at a given zoom level.
+///
+/// Clamps to valid range [0, 2^zoom - 1] to handle edge coordinates like lon=180.
 int lonToTileX(double lon, int zoom) {
-  return ((lon + 180.0) / 360.0 * pow(2, zoom)).floor();
+  final maxTile = (1 << zoom) - 1; // 2^zoom - 1
+  final x = ((lon + 180.0) / 360.0 * (1 << zoom)).floor();
+  return x.clamp(0, maxTile);
 }
 
 /// Convert latitude to tile Y index at a given zoom level.
+///
+/// Clamps to valid range [0, 2^zoom - 1] to handle edge coordinates.
+/// Web Mercator is defined for latitudes ~[-85.051, 85.051].
 int latToTileY(double lat, int zoom) {
-  final latRad = lat * pi / 180.0;
-  return ((1.0 - log(tan(latRad) + 1.0 / cos(latRad)) / pi) /
+  final maxTile = (1 << zoom) - 1; // 2^zoom - 1
+  // Clamp latitude to Web Mercator bounds to avoid math errors
+  final clampedLat = lat.clamp(-85.0511, 85.0511);
+  final latRad = clampedLat * pi / 180.0;
+  final y = ((1.0 - log(tan(latRad) + 1.0 / cos(latRad)) / pi) /
           2.0 *
-          pow(2, zoom))
+          (1 << zoom))
       .floor();
+  return y.clamp(0, maxTile);
 }
 
 /// Convert tile X index back to longitude (west edge of tile).

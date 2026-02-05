@@ -47,7 +47,7 @@ void main() {
   });
 
   group('countTilesInBBox', () {
-    test('counts tiles at zoom 0 for large area', () {
+    test('counts single tile at zoom 0 for world bbox', () {
       final counts = countTilesInBBox(
         minLat: -85,
         minLon: -180,
@@ -56,9 +56,22 @@ void main() {
         minZoom: 0,
         maxZoom: 0,
       );
-      // At zoom 0, even a large bbox may span 1-2 tiles depending on boundaries
-      expect(counts[0], greaterThan(0));
-      expect(counts[0], lessThanOrEqualTo(4));
+      // At zoom 0, there is exactly 1 tile (the entire world)
+      // lonToTileX and latToTileY now clamp to valid range [0, 2^z-1]
+      expect(counts[0], 1);
+    });
+
+    test('counts 4 tiles at zoom 1 for world bbox', () {
+      final counts = countTilesInBBox(
+        minLat: -85,
+        minLon: -180,
+        maxLat: 85,
+        maxLon: 180,
+        minZoom: 1,
+        maxZoom: 1,
+      );
+      // At zoom 1, there are exactly 4 tiles (2x2 grid)
+      expect(counts[1], 4);
     });
 
     test('counts more tiles at higher zooms', () {
