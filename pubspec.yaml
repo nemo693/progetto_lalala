@@ -16,6 +16,7 @@ dependencies:
 
   # Location
   geolocator: ^14.0.1
+  geolocator_android: ^5.0.0
   permission_handler: ^11.3.1
 
   # GPX handling
@@ -34,6 +35,11 @@ dependencies:
   # Utilities
   intl: ^0.19.0
   path: ^1.9.0
+
+dependency_overrides:
+  # Avoid objective_c native build hook failing on Windows with spaces in user path.
+  # path_provider_foundation is only used on iOS/macOS; Android build doesn't need it.
+  path_provider_foundation: 2.4.0
 
 dev_dependencies:
   flutter_test:
