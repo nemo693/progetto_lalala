@@ -231,27 +231,28 @@ class MapLibreProvider implements MapProvider {
     }
 
     // Accuracy circle (drawn first so it's behind the dot)
+    // Make it more visible with stronger colors and larger minimum size
     _accuracyCircle = await c.addCircle(
       CircleOptions(
         geometry: pos,
-        circleRadius: radiusPx,
+        circleRadius: radiusPx.clamp(8.0, 500.0), // Minimum 8px for visibility
         circleColor: '#4A90D9',
-        circleOpacity: 0.15,
+        circleOpacity: 0.2, // Increased from 0.15
         circleStrokeColor: '#4A90D9',
-        circleStrokeWidth: 1,
-        circleStrokeOpacity: 0.3,
+        circleStrokeWidth: 2, // Increased from 1
+        circleStrokeOpacity: 0.5, // Increased from 0.3
       ),
     );
 
-    // Center dot (fixed 8px)
+    // Center dot (fixed 10px, slightly larger for better visibility)
     _locationCircle = await c.addCircle(
       CircleOptions(
         geometry: pos,
-        circleRadius: 8,
+        circleRadius: 10, // Increased from 8
         circleColor: '#4A90D9',
-        circleOpacity: 0.9,
+        circleOpacity: 1.0, // Fully opaque
         circleStrokeColor: '#FFFFFF',
-        circleStrokeWidth: 2,
+        circleStrokeWidth: 3, // Increased from 2
         circleStrokeOpacity: 1,
       ),
     );
@@ -267,7 +268,7 @@ class MapLibreProvider implements MapProvider {
     if (lat == null || meters == null) return;
 
     final zoom = c.cameraPosition?.zoom ?? 15;
-    final radiusPx = metersToPixels(meters, zoom, lat);
+    final radiusPx = metersToPixels(meters, zoom, lat).clamp(8.0, 500.0);
 
     await c.updateCircle(
       _accuracyCircle!,
