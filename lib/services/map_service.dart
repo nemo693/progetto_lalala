@@ -123,16 +123,25 @@ class MapLibreProvider implements MapProvider {
     final c = _controller;
     if (c == null) return;
 
-    // Build a GeoJSON LineString from coordinate pairs [lat, lon]
+    // Remove any existing layer/source with this id to avoid duplicate crashes
+    await removeLayer(id);
+
+    // Build a GeoJSON FeatureCollection with a LineString from coordinate pairs [lat, lon].
+    // MapLibre's native GeoJSON source expects a FeatureCollection, not a bare Feature.
     final geojson = {
-      'type': 'Feature',
-      'geometry': {
-        'type': 'LineString',
-        // GeoJSON uses [lon, lat] order
-        'coordinates':
-            coordinates.map((p) => [p[1], p[0]]).toList(),
-      },
-      'properties': <String, dynamic>{},
+      'type': 'FeatureCollection',
+      'features': [
+        {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'LineString',
+            // GeoJSON uses [lon, lat] order
+            'coordinates':
+                coordinates.map((p) => [p[1], p[0]]).toList(),
+          },
+          'properties': <String, dynamic>{},
+        },
+      ],
     };
 
     await c.addSource(id, GeojsonSourceProperties(data: geojson));
@@ -151,8 +160,16 @@ class MapLibreProvider implements MapProvider {
   Future<void> removeLayer(String id) async {
     final c = _controller;
     if (c == null) return;
-    await c.removeLayer('${id}_line');
-    await c.removeSource(id);
+    try {
+      await c.removeLayer('${id}_line');
+    } catch (_) {
+      // Layer may not exist — ignore
+    }
+    try {
+      await c.removeSource(id);
+    } catch (_) {
+      // Source may not exist — ignore
+    }
   }
 
   // Track symbols added for waypoint markers
@@ -199,7 +216,11 @@ class MapLibreProvider implements MapProvider {
     final symbols = _waypointSymbols.remove(id);
     if (symbols != null) {
       for (final s in symbols) {
-        await c.removeSymbol(s);
+        try {
+          await c.removeSymbol(s);
+        } catch (_) {
+          // Symbol may already be removed — ignore
+        }
       }
     }
   }

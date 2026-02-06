@@ -20,7 +20,7 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _mapProvider = MapLibreProvider();
   final _locationService = LocationService();
   final _gpxService = GpxService();
@@ -48,7 +48,25 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initLocation();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When the app comes back to the foreground, refresh the UI with the
+    // latest position the foreground service may have delivered while
+    // backgrounded.  The position stream keeps firing (foreground service),
+    // but setState calls are no-ops while the widget tree is inactive, so
+    // the map and stats may be stale.
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+      final pos = _currentPosition;
+      if (pos != null) {
+        _updateLocationMarker(pos);
+        if (_followingUser) _moveCameraToPosition(pos);
+      }
+    }
   }
 
   Future<void> _initLocation() async {
@@ -331,9 +349,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _startRecording() {
-    // Switch to high-accuracy GPS for recording
+    // Switch to high-accuracy GPS with foreground service for recording.
+    // The foreground service keeps GPS alive when the app is backgrounded.
     _locationService.stopListening();
-    _locationService.startListening(highAccuracy: true, distanceFilter: 3);
+    _locationService.startListening(
+      highAccuracy: true,
+      distanceFilter: 3,
+      foreground: true,
+    );
 
     _recorder.start();
     // Update recording stats display every second
@@ -508,6 +531,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _recordingTimer?.cancel();
     _locationSub?.cancel();
     _locationService.dispose();
