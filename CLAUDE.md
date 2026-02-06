@@ -173,6 +173,14 @@ Mapbox tokens (Phase 5 only) go in:
 3. **Test file**: Default `widget_test.dart` referenced non-existent `MyApp` — replaced with `AlpineNavApp` smoke test.
 4. **Tile source fallback**: Added `MapLibreProvider.fallbackStyleUrl` pointing to `demotiles.maplibre.org/style.json`.
 
+### Device testing fixes (Redmi 14, Feb 2026)
+**Issues found and fixed:**
+1. **Accuracy circle not visible**: Increased opacity (0.15 → 0.2), stroke width (1px → 2px), stroke opacity (0.3 → 0.5), minimum radius (4px → 8px). Center dot larger (8px → 10px) and fully opaque. Circle now clearly visible at all zoom levels.
+2. **Auto-follow has no visual indicator**: Location button now highlights in blue when auto-follow is active. Tooltip changes to "Following location" when enabled. Users can now see the mode at a glance.
+3. **Auto-follow can't be disabled**: Added logic to disable auto-follow when user manually pans map >100m from their position. Button returns to gray state. Tap to re-enable.
+4. **GPX import crashes**: Added comprehensive error handling with specific messages for permissions, file access, and format issues. File picker now filters to `.gpx` and `.xml` only. Validates empty track data. Errors display for 6 seconds.
+5. **Save recording crashes**: Added try-catch with validation (minimum 2 points), specific error messages for permissions/storage issues, and guaranteed GPS mode restoration in finally block. Mounted state checks before setState.
+
 ### What's done (Phase 3 — offline tile download core)
 - `lib/utils/tile_calculator.dart`: Full implementation with:
   - `BoundingBox` class for area definitions
@@ -198,12 +206,13 @@ Mapbox tokens (Phase 5 only) go in:
 - Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart`
 
 ### What needs to happen next
-1. **Test on device**: Install APK on an Android device/emulator. Verify Phase 1-2 features work.
+1. **Complete device testing**: Re-test with fixed build on Redmi 14 to verify all issues resolved. Confirm accuracy circle visible, auto-follow indicator works, GPX import succeeds, recording save succeeds.
 2. **Add offline download UI** (Phase 3 completion):
    - Region selection screen (map bbox selection or route selection)
    - Download progress overlay with cancel button
    - Region management screen (list, delete, storage stats)
    - Integrate cached tiles with MapLibre (custom tile source)
+   - Offline indicator on map screen
 3. **Proceed to Phase 4**: WMS data (Italian orthophotos)
 
 ### Phase 3 remaining work

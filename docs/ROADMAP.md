@@ -18,18 +18,20 @@
 
 **Goal**: Import, view, and record GPX tracks.
 
-- [ ] Import GPX files from device storage (file picker)
-- [ ] Parse GPX tracks and waypoints
-- [ ] Display track as polyline on map
-- [ ] Display waypoints as markers
-- [ ] Start/end markers for tracks
-- [ ] Auto-zoom to fit imported track
-- [ ] Track recording: start/stop/pause
-- [ ] Live stats during recording: distance, elapsed time, current elevation, elevation gain
-- [ ] Save recorded track as GPX
-- [ ] Route list screen (saved + imported)
-- [ ] Delete routes
+- [x] Import GPX files from device storage (file picker)
+- [x] Parse GPX tracks and waypoints
+- [x] Display track as polyline on map
+- [x] Display waypoints as markers
+- [x] Start/end markers for tracks
+- [x] Auto-zoom to fit imported track
+- [x] Track recording: start/stop/pause
+- [x] Live stats during recording: distance, elapsed time, current elevation, elevation gain
+- [x] Save recorded track as GPX
+- [x] Route list screen (saved + imported)
+- [x] Delete routes
 - [ ] Export routes (share GPX file)
+
+**Status**: ✅ Core features complete. Device testing in progress (Redmi 14). Export feature pending.
 
 **Done when**: You can load a GPX from a planning tool, see it on the map, record your actual track, and compare them.
 
@@ -38,13 +40,16 @@
 **Goal**: Full map functionality without network.
 
 - [ ] Manual region download: draw rectangle, select zoom range, download tiles
-- [ ] Progress indicator during download (tile count, MB, estimated remaining)
-- [ ] Route-based download: select a saved route, specify buffer distance, download
-- [ ] Tile storage in MBTiles format
-- [ ] Storage management screen: list cached regions, show size, delete
+- [x] Progress indicator during download (tile count, MB, estimated remaining) — **backend ready**
+- [x] Route-based download: select a saved route, specify buffer distance, download — **backend ready**
+- [x] Tile storage in MBTiles format — **implemented**
+- [ ] Storage management screen: list cached regions, show size, delete — **backend ready, UI pending**
 - [ ] Offline indicator in UI (icon when no network)
-- [ ] Graceful degradation: cached tiles shown, missing tiles handled cleanly
+- [x] Graceful degradation: cached tiles shown, missing tiles handled cleanly — **backend ready**
 - [ ] Background download support (continue when app is backgrounded)
+- [ ] Integration with MapLibre to serve cached tiles as custom tile source
+
+**Status**: 🟡 Backend complete (`tile_calculator.dart`, `offline_manager.dart`). UI implementation pending.
 
 **Done when**: You can download a region at home, enable airplane mode, and navigate in the field using cached tiles.
 
