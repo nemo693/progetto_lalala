@@ -243,12 +243,22 @@ class MapLibreProvider implements MapProvider {
 
     final pos = LatLng(latitude, longitude);
 
-    // Remove previous circles
+    // Remove previous circles (catch errors from stale references after style reload)
     if (_accuracyCircle != null) {
-      await c.removeCircle(_accuracyCircle!);
+      try {
+        await c.removeCircle(_accuracyCircle!);
+      } catch (_) {
+        // Circle may have been invalidated by style reload
+      }
+      _accuracyCircle = null;
     }
     if (_locationCircle != null) {
-      await c.removeCircle(_locationCircle!);
+      try {
+        await c.removeCircle(_locationCircle!);
+      } catch (_) {
+        // Circle may have been invalidated by style reload
+      }
+      _locationCircle = null;
     }
 
     // Accuracy circle (drawn first so it's behind the dot)
@@ -277,6 +287,15 @@ class MapLibreProvider implements MapProvider {
         circleStrokeOpacity: 1,
       ),
     );
+  }
+
+  /// Clear stale circle references after a style reload.
+  /// The circles no longer exist on the map after a reload, so we just
+  /// null the references to prevent removeCircle from failing silently
+  /// while leaving ghost circles behind.
+  void clearLocationMarkerRefs() {
+    _locationCircle = null;
+    _accuracyCircle = null;
   }
 
   /// Recalculate the accuracy circle size for the current zoom level.

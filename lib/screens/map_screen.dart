@@ -128,6 +128,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
+    // Style reload invalidates all map objects — clear stale references
+    _mapProvider.clearLocationMarkerRefs();
     final pos = _currentPosition;
     if (pos != null) {
       _updateLocationMarker(pos);
