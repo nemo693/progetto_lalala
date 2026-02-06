@@ -122,6 +122,27 @@ class _MapScreenState extends State<MapScreen> {
 
   void _onCameraIdle() {
     _mapProvider.onCameraIdle();
+    // Disable auto-follow if user manually moved the camera
+    // (camera moves from position updates don't count)
+    if (_followingUser && _currentPosition != null) {
+      final controller = _mapProvider.controller;
+      if (controller != null) {
+        final cameraPos = controller.cameraPosition;
+        if (cameraPos != null) {
+          final userLat = _currentPosition!.latitude;
+          final userLon = _currentPosition!.longitude;
+          final cameraLat = cameraPos.target.latitude;
+          final cameraLon = cameraPos.target.longitude;
+
+          // If camera is more than ~100m away from user position, disable follow
+          final distLat = (cameraLat - userLat).abs();
+          final distLon = (cameraLon - userLon).abs();
+          if (distLat > 0.001 || distLon > 0.001) {
+            setState(() => _followingUser = false);
+          }
+        }
+      }
+    }
   }
 
   void _zoomToLocation() async {
@@ -146,24 +167,55 @@ class _MapScreenState extends State<MapScreen> {
   // ── GPX Import ─────────────────────────────────────────────────────────
 
   Future<void> _importGpx() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.any,
-      allowMultiple: false,
-    );
-
-    if (result == null || result.files.isEmpty) return;
-    final path = result.files.single.path;
-    if (path == null) return;
-
     try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['gpx', 'xml'],
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.single;
+      final path = file.path;
+
+      if (path == null || path.isEmpty) {
+        if (mounted) {
+          setState(() => _locationError = 'Could not access file. Try copying it to Downloads folder.');
+        }
+        return;
+      }
+
+      // Import and save
       final imported = await _gpxService.importFromFile(path);
+
+      if (imported.route.points.isEmpty) {
+        if (mounted) {
+          setState(() => _locationError = 'GPX file contains no track points');
+        }
+        return;
+      }
+
       await _storage.saveRoute(imported.route, imported.waypoints);
       _showRoute(imported.route, imported.waypoints);
+
     } catch (e) {
       if (mounted) {
-        setState(() => _locationError = 'Failed to import GPX: $e');
-        // Clear error after 4 seconds
-        Future.delayed(const Duration(seconds: 4), () {
+        // Provide more specific error messages
+        String errorMsg = 'Failed to import GPX';
+        if (e.toString().contains('Permission')) {
+          errorMsg = 'Storage permission denied. Check app settings.';
+        } else if (e.toString().contains('FileSystemException')) {
+          errorMsg = 'Could not read file. Try moving it to Downloads.';
+        } else if (e.toString().contains('FormatException') || e.toString().contains('XmlParserException')) {
+          errorMsg = 'Invalid GPX file format';
+        } else {
+          errorMsg = 'Failed to import: ${e.toString().split('\n').first}';
+        }
+
+        setState(() => _locationError = errorMsg);
+        // Clear error after 6 seconds (longer for reading)
+        Future.delayed(const Duration(seconds: 6), () {
           if (mounted) setState(() => _locationError = null);
         });
       }
@@ -347,37 +399,64 @@ class _MapScreenState extends State<MapScreen> {
 
     final points = _recorder.stop();
     if (points.length < 2) {
+      if (mounted) {
+        setState(() => _locationError = 'Track too short (need at least 2 points)');
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _locationError = null);
+        });
+      }
       setState(() {});
       return;
     }
 
-    // Ask for a name
-    final name = await _promptRouteName();
-    if (name == null || name.isEmpty) {
-      // Save with default name
-      final route = NavRoute.fromPoints(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: 'Track ${DateTime.now().toString().substring(0, 16)}',
-        points: List.of(points),
-        source: RouteSource.recorded,
-      );
-      await _storage.saveRoute(route);
-      _showRoute(route, []);
-    } else {
-      final route = NavRoute.fromPoints(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: name,
-        points: List.of(points),
-        source: RouteSource.recorded,
-      );
-      await _storage.saveRoute(route);
-      _showRoute(route, []);
-    }
+    try {
+      // Ask for a name
+      String? name;
+      if (mounted) {
+        name = await _promptRouteName();
+      }
 
-    // Switch back to normal GPS
-    _locationService.stopListening();
-    _locationService.startListening();
-    setState(() {});
+      // Create route with user-provided name or default
+      final routeName = (name != null && name.isNotEmpty)
+          ? name
+          : 'Track ${DateTime.now().toString().substring(0, 16)}';
+
+      final route = NavRoute.fromPoints(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: routeName,
+        points: List.of(points),
+        source: RouteSource.recorded,
+      );
+
+      // Save to storage
+      await _storage.saveRoute(route);
+
+      // Display on map
+      if (mounted) {
+        _showRoute(route, []);
+      }
+    } catch (e) {
+      if (mounted) {
+        String errorMsg = 'Failed to save track';
+        if (e.toString().contains('Permission')) {
+          errorMsg = 'Storage permission denied. Check app settings.';
+        } else if (e.toString().contains('FileSystemException')) {
+          errorMsg = 'Could not save file. Check storage space.';
+        } else {
+          errorMsg = 'Failed to save: ${e.toString().split('\n').first}';
+        }
+
+        setState(() => _locationError = errorMsg);
+        Future.delayed(const Duration(seconds: 6), () {
+          if (mounted) setState(() => _locationError = null);
+        });
+      }
+    } finally {
+      // Always switch back to normal GPS
+      _locationService.stopListening();
+      _locationService.startListening();
+      if (mounted) setState(() {});
+    }
   }
 
   void _discardRecording() {
@@ -475,8 +554,9 @@ class _MapScreenState extends State<MapScreen> {
                 const SizedBox(height: 8),
                 _ControlButton(
                   icon: Icons.my_location,
-                  tooltip: 'Zoom to location',
+                  tooltip: _followingUser ? 'Following location' : 'Zoom to location',
                   onPressed: _zoomToLocation,
+                  isActive: _followingUser,
                 ),
                 const SizedBox(height: 8),
                 _ControlButton(
@@ -551,11 +631,13 @@ class _ControlButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
+  final bool isActive;
 
   const _ControlButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.isActive = false,
   });
 
   @override
@@ -564,14 +646,18 @@ class _ControlButton extends StatelessWidget {
       width: 48,
       height: 48,
       child: Material(
-        color: Colors.black54,
+        color: isActive ? const Color(0xFF4A90D9) : Colors.black54,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           onTap: onPressed,
           borderRadius: BorderRadius.circular(8),
           child: Tooltip(
             message: tooltip,
-            child: Icon(icon, color: Colors.white70, size: 24),
+            child: Icon(
+              icon,
+              color: isActive ? Colors.white : Colors.white70,
+              size: 24,
+            ),
           ),
         ),
       ),
