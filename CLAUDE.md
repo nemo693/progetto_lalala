@@ -65,28 +65,25 @@ The developer is **new to**:
 
 ## Key Commands
 
+**IMPORTANT**: `flutter` is NOT on PATH in Claude Code sessions. Always use the full path with `.bat` extension and quote it. The working directory must be set with `cd` first because the path has spaces.
+
 ```bash
-# Run on connected device/emulator
-flutter run
+# The flutter command in Claude Code (spaces in path require cd + quoted .bat):
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" <command>
 
-# Run with verbose logging
-flutter run -v
-
-# Build APK
-flutter build apk
-
-# Run tests
-flutter test
-
-# Analyze code
-flutter analyze
-
-# Get dependencies
-flutter pub get
-
-# Check Flutter setup
-flutter doctor
+# Examples:
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" analyze
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" test
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" run
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" build apk
+cd "C:/Users/Emilio Dorigatti/progetto_lalala" && "C:/Users/Emilio Dorigatti/flutter/bin/flutter.bat" pub get
 ```
+
+Why this is needed:
+- Flutter SDK lives at `C:\Users\Emilio Dorigatti\flutter` (space in username)
+- Bare `flutter` fails: not on PATH in the Claude Code bash shell
+- Unquoted full path fails: shell splits on the space ("C:\Users\Emilio" not recognized)
+- Must use `.bat` extension explicitly on Windows
 
 ## Architecture Decisions
 
@@ -175,12 +172,21 @@ Mapbox tokens (Phase 5 only) go in:
 - `flutter analyze` — clean (0 issues)
 - `flutter test` — 55 tests passed
 - `flutter build apk --debug` — **builds successfully** (181MB debug APK). Requires Android SDK setup (automated by `scripts/setup_env.sh`).
+- `flutter run --release` — **builds successfully** (52.5MB release APK). Note: first run always fails with "Flusso illeggibile" (`Set-Content` error in `update_engine_version.ps1` due to spaces in Flutter SDK path) — re-run immediately and it works.
+
+### Known Windows issues (spaces in user path)
+The Flutter SDK is installed at `C:\Users\Emilio Dorigatti\flutter` — the space in the username causes two recurring issues:
+1. **`update_engine_version.ps1` failure**: PowerShell `Set-Content` fails to write `engine.stamp` on first run after cache clear or Flutter upgrade. Workaround: run the command twice.
+2. **`objective_c` build hook failure**: The native asset build hook for `objective_c` (transitive dep via `path_provider` → `path_provider_foundation`) can't handle spaces in paths. Fixed via `dependency_overrides` in `pubspec.yaml`. Moving the Flutter SDK to `C:\flutter` would permanently fix both issues.
 
 ### What's been fixed since initial code
 1. **Accuracy circle**: `CircleOptions.circleRadius` was receiving meters instead of pixels. Added `metersToPixels()` static method with ground-resolution formula. Accuracy circle now recalculates on zoom via `onCameraIdle()`.
 2. **Missing `dart:math` import**: `Point` class needed explicit import from `dart:math` in `map_screen.dart`.
 3. **Test file**: Default `widget_test.dart` referenced non-existent `MyApp` — replaced with `AlpineNavApp` smoke test.
 4. **Tile source fallback**: Added `MapLibreProvider.fallbackStyleUrl` pointing to `demotiles.maplibre.org/style.json`.
+5. **Windows spaces-in-path build fix**: `objective_c` native build hook crashes on Windows when user profile path contains spaces (e.g. `C:\Users\Emilio Dorigatti`). Fixed by adding `dependency_overrides` in `pubspec.yaml` to pin `path_provider_foundation: 2.4.0` (pre-FFI version without `objective_c` dependency). Safe because `path_provider_foundation` is iOS/macOS only — never used on Android.
+6. **GeoJSON FeatureCollection crash fix**: `addTrackLayer` was passing a bare GeoJSON `Feature` to MapLibre's `addSource()`, but the native code (`mbgl::android::geojson::FeatureCollection::convert`) expects a `FeatureCollection`. Wrapped the Feature in a FeatureCollection to fix a JNI abort crash when displaying GPX tracks.
+7. **Duplicate layer crash fix**: Opening a second GPX track while one was already displayed crashed because `addTrackLayer` tried to add a source/layer with an ID that already existed. Fixed by: (a) calling `removeLayer(id)` at the start of `addTrackLayer` to clean up before adding, and (b) wrapping `removeLayer`, `removeSource`, and `removeSymbol` calls in try/catch so they don't crash if the layer/source/symbol doesn't exist.
 
 ### Device testing fixes (Redmi 14, Feb 2026)
 **Issues found and fixed:**
@@ -238,3 +244,4 @@ Mapbox tokens (Phase 5 only) go in:
 - Keep services stateless where possible; pass dependencies explicitly
 - Prefer composition over inheritance
 - Write TODO comments with context: `// TODO(phase2): implement GPX waypoint parsing`
+- **Always commit and push** after completing work. Commit with a clear message, then `git push`.

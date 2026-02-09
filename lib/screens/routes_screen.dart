@@ -112,6 +112,7 @@ class _RouteListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final distKm = (route.distance / 1000).toStringAsFixed(1);
     final gainM = route.elevationGain.round();
+    final lossM = route.elevationLoss.round();
     final dur = _formatDuration(route.duration);
     final source = route.source == RouteSource.recorded ? 'REC' : 'GPX';
 
@@ -167,7 +168,7 @@ class _RouteListItem extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '$distKm km  +${gainM}m  $dur',
+                    '$distKm km  +${gainM}m  -${lossM}m  $dur',
                     style: const TextStyle(
                       color: Colors.white38,
                       fontSize: 12,
