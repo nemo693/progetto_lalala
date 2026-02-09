@@ -32,6 +32,12 @@ dependencies:
   # File picking (for GPX import)
   file_picker: ^8.1.6
 
+  # Connectivity detection (offline indicator)
+  connectivity_plus: ^6.0.0
+
+  # Foreground service (keep download alive when screen off)
+  flutter_foreground_task: ^9.2.0
+
   # Utilities
   intl: ^0.19.0
   path: ^1.9.0

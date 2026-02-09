@@ -4,12 +4,19 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
+import '../main.dart' show offlineManager;
 import '../models/route.dart';
 import '../models/waypoint.dart' as model;
+import '../services/connectivity_service.dart';
+import '../services/download_foreground_service.dart';
 import '../services/map_service.dart';
 import '../services/location_service.dart';
 import '../services/gpx_service.dart';
+import '../services/offline_manager.dart';
 import '../services/route_storage_service.dart';
+import '../utils/tile_calculator.dart';
+import '../widgets/download_progress_overlay.dart';
+import 'offline_regions_screen.dart';
 import 'routes_screen.dart';
 
 /// Main screen — map fills the screen with minimal overlay controls.
@@ -26,12 +33,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _gpxService = GpxService();
   final _storage = RouteStorageService();
   final _recorder = TrackRecorder();
+  final _connectivityService = ConnectivityService();
 
   StreamSubscription<Position>? _locationSub;
+  StreamSubscription<bool>? _connectivitySub;
   Position? _currentPosition;
   String? _locationError;
   bool _styleLoaded = false;
   bool _followingUser = true;
+  bool _isOnline = true;
 
   // Displayed route
   NavRoute? _activeRoute;
@@ -39,6 +49,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   // Recording UI update timer
   Timer? _recordingTimer;
+
+  // Offline download state
+  Stream<DownloadProgress>? _downloadStream;
+  StreamSubscription<DownloadProgress>? _downloadProgressSub;
+  bool _isDownloading = false;
 
   // Default camera: centered on the Italian Alps (Dolomites area)
   static const _defaultLat = 46.5;
@@ -50,6 +65,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initLocation();
+    _initConnectivity();
   }
 
   @override
@@ -86,6 +102,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     await _locationService.startListening();
     _locationSub = _locationService.positionStream.listen(_onPositionUpdate);
+  }
+
+  Future<void> _initConnectivity() async {
+    await _connectivityService.initialize();
+    if (mounted) {
+      setState(() => _isOnline = _connectivityService.isOnline);
+    }
+    _connectivitySub = _connectivityService.onlineStream.listen((online) {
+      if (mounted) setState(() => _isOnline = online);
+    });
   }
 
   void _onPositionUpdate(Position pos) {
@@ -529,12 +555,292 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ── Offline Download ─────────────────────────────────────────────────
+
+  void _showDownloadOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.crop_square, color: Colors.white70),
+              title: const Text('Download visible area',
+                  style: TextStyle(color: Colors.white70)),
+              subtitle: const Text('Save current map view for offline use',
+                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _configureVisibleAreaDownload();
+              },
+            ),
+            if (_activeRoute != null)
+              ListTile(
+                leading: const Icon(Icons.route, color: Colors.white70),
+                title: const Text('Download around route',
+                    style: TextStyle(color: Colors.white70)),
+                subtitle: Text(
+                    'Save tiles along ${_activeRoute!.name}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _configureRouteDownload();
+                },
+              ),
+            const Divider(color: Colors.white12),
+            ListTile(
+              leading: const Icon(Icons.folder, color: Colors.white70),
+              title: const Text('Manage offline regions',
+                  style: TextStyle(color: Colors.white70)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openRegionsScreen();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _configureVisibleAreaDownload() {
+    final controller = _mapProvider.controller;
+    if (controller == null) return;
+
+    final cameraPos = controller.cameraPosition;
+    if (cameraPos == null) return;
+
+    // Get visible bounds from current camera position
+    // Estimate bbox from center + zoom
+    final lat = cameraPos.target.latitude;
+    final lon = cameraPos.target.longitude;
+    final zoom = cameraPos.zoom;
+
+    // Approximate visible area based on zoom level
+    // At zoom 10, ~1 degree is visible; at zoom 15, ~0.03 degrees
+    final span = 360.0 / (1 << zoom.round()) * 2;
+    final bounds = BoundingBox(
+      minLat: lat - span / 2,
+      minLon: lon - span / 2,
+      maxLat: lat + span / 2,
+      maxLon: lon + span / 2,
+    );
+
+    _showDownloadConfigDialog(
+      bounds: bounds,
+      suggestedName: 'Map ${DateTime.now().toString().substring(0, 10)}',
+    );
+  }
+
+  void _configureRouteDownload() {
+    if (_activeRoute == null) return;
+
+    final bbox = computeRouteBBox(_activeRoute!.coordinatePairs);
+    if (bbox == null) return;
+
+    final buffered = computeBufferedBBox(bbox, 5000); // 5km buffer
+
+    _showDownloadConfigDialog(
+      bounds: buffered,
+      suggestedName: _activeRoute!.name,
+    );
+  }
+
+  void _showDownloadConfigDialog({
+    required BoundingBox bounds,
+    required String suggestedName,
+  }) {
+    final nameController = TextEditingController(text: suggestedName);
+    int minZoom = 10;
+    int maxZoom = 15;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final tileCount = offlineManager.estimateTileCount(
+            bounds, minZoom, maxZoom,
+          );
+          final sizeEstimate = formatBytes(
+            offlineManager.estimateSize(tileCount),
+          );
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            title: const Text('Download offline map',
+                style: TextStyle(color: Colors.white70)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameController,
+                  style: const TextStyle(color: Colors.white70),
+                  decoration: const InputDecoration(
+                    labelText: 'Region name',
+                    labelStyle: TextStyle(color: Colors.white38),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white54),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text('Min zoom: $minZoom',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                Slider(
+                  value: minZoom.toDouble(),
+                  min: 6,
+                  max: maxZoom.toDouble(),
+                  divisions: maxZoom - 6,
+                  label: '$minZoom',
+                  onChanged: (v) =>
+                      setDialogState(() => minZoom = v.round()),
+                ),
+                Text('Max zoom: $maxZoom',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                Slider(
+                  value: maxZoom.toDouble(),
+                  min: minZoom.toDouble(),
+                  max: 16,
+                  divisions: 16 - minZoom,
+                  label: '$maxZoom',
+                  onChanged: (v) =>
+                      setDialogState(() => maxZoom = v.round()),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('~$tileCount tiles',
+                          style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                              fontFamily: 'monospace')),
+                      Text('~$sizeEstimate',
+                          style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                              fontFamily: 'monospace')),
+                    ],
+                  ),
+                ),
+                if (tileCount > 10000)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Large download. Consider reducing zoom range.',
+                      style: TextStyle(
+                          color: Colors.orange.shade300, fontSize: 11),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _startDownload(
+                    name: nameController.text.isNotEmpty
+                        ? nameController.text
+                        : suggestedName,
+                    bounds: bounds,
+                    minZoom: minZoom,
+                    maxZoom: maxZoom,
+                  );
+                },
+                child: const Text('Download'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _startDownload({
+    required String name,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+  }) async {
+    // Start foreground service so download survives screen-off / app switch
+    await DownloadForegroundService.start();
+
+    final stream = offlineManager.downloadRegion(
+      regionName: name,
+      bounds: bounds,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+    );
+
+    final broadcastStream = stream.asBroadcastStream();
+
+    // Listen to progress to update the foreground notification
+    _downloadProgressSub = broadcastStream.listen((progress) {
+      DownloadForegroundService.updateProgress(progress.progressPercent);
+      if (progress.isComplete) {
+        _downloadProgressSub?.cancel();
+        _downloadProgressSub = null;
+        DownloadForegroundService.stop();
+      }
+    });
+
+    setState(() {
+      _downloadStream = broadcastStream;
+      _isDownloading = true;
+    });
+  }
+
+  void _cancelDownload() {
+    _downloadProgressSub?.cancel();
+    _downloadProgressSub = null;
+    DownloadForegroundService.stop();
+    setState(() {
+      _downloadStream = null;
+      _isDownloading = false;
+    });
+  }
+
+  void _onDownloadComplete() {
+    // Foreground service already stopped by the progress listener
+    setState(() {
+      _downloadStream = null;
+      _isDownloading = false;
+    });
+  }
+
+  Future<void> _openRegionsScreen() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const OfflineRegionsScreen()),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _recordingTimer?.cancel();
     _locationSub?.cancel();
+    _connectivitySub?.cancel();
+    _downloadProgressSub?.cancel();
     _locationService.dispose();
+    _connectivityService.dispose();
     _mapProvider.dispose();
     super.dispose();
   }
@@ -594,6 +900,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   tooltip: 'Routes',
                   onPressed: _openRoutesList,
                 ),
+                const SizedBox(height: 8),
+                _ControlButton(
+                  icon: Icons.cloud_download,
+                  tooltip: 'Offline maps',
+                  onPressed: _showDownloadOptions,
+                ),
               ],
             ),
           ),
@@ -633,6 +945,42 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               bottom: MediaQuery.of(context).padding.bottom + 32,
               right: 12,
               child: _CoordinateChip(position: _currentPosition!),
+            ),
+
+          // ── Offline indicator: top-left ──────────────────────
+          if (!_isOnline)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 68,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade900.withAlpha(200),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.cloud_off, color: Colors.white70, size: 14),
+                    SizedBox(width: 4),
+                    Text('Offline',
+                        style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── Download progress overlay ──────────────────────
+          if (_isDownloading && _downloadStream != null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 70,
+              left: 12,
+              right: 68,
+              child: DownloadProgressOverlay(
+                progressStream: _downloadStream!,
+                onCancel: _cancelDownload,
+                onComplete: _onDownloadComplete,
+              ),
             ),
 
           // ── Location error: top-center ──────────────────────

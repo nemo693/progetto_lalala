@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
-import 'screens/map_screen.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
-void main() {
+import 'screens/map_screen.dart';
+import 'services/offline_manager.dart';
+
+/// Global singleton for offline tile management.
+/// Initialized before runApp() so it's available everywhere.
+final offlineManager = OfflineManager();
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.initCommunicationPort();
+  await offlineManager.initialize();
   runApp(const AlpineNavApp());
 }
 
