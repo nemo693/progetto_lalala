@@ -12,7 +12,9 @@ AlpineNav is an offline-first outdoor navigation app for skitouring, hiking, and
 - **Mapping (2D)**: MapLibre GL for Flutter (`maplibre_gl`) + OpenFreeMap tiles
 - **Mapping (3D, Phase 5)**: Mapbox Maps SDK (deferred until 3D terrain needed)
 - **Platform**: Android first (no iOS until Android is solid)
-- **Offline tiles**: MBTiles format (SQLite-based)
+- **Offline tiles**: MapLibre native offline API (automatic tile cache)
+- **Background downloads**: `flutter_foreground_task` (Android foreground service)
+- **Connectivity**: `connectivity_plus` for online/offline detection
 - **State management**: TBD (start simple, add if needed)
 
 ## Developer Context
@@ -90,7 +92,7 @@ flutter doctor
 
 1. **MapLibre for 2D, Mapbox for 3D only**: MapLibre is open source, no API keys needed. Mapbox is deferred to Phase 5 for 3D terrain. If MapLibre ships mobile 3D terrain (expected late 2026), Mapbox may not be needed at all.
 2. **Abstract the map layer**: `MapProvider` interface in `map_service.dart` allows swapping between MapLibre and Mapbox without touching the rest of the app. `MapLibreProvider` is the active implementation.
-3. **Offline-first**: All features must work without network. Tile cache uses MBTiles (SQLite). Route data stored locally.
+3. **Offline-first**: All features must work without network. Tile cache uses MapLibre's native offline API (`downloadOfflineRegion`). Route data stored locally as GPX files. Background downloads use Android foreground service to survive screen-off.
 4. **Android-only**: Simpler setup, cheaper ($25 vs $99/year), no Mac needed.
 5. **Minimal UI**: Map fills screen. Controls overlay minimally. No bottom nav bars, no card designs, no Material floating aesthetic. Muted colors, large touch targets (gloves).
 
@@ -98,26 +100,33 @@ flutter doctor
 
 ```
 lib/
-  main.dart                    # App entry point
+  main.dart                              # App entry point, OfflineManager init
   screens/
-    map_screen.dart            # Main map view (primary screen)
+    map_screen.dart                      # Main map view (primary screen)
+    routes_screen.dart                   # Route list management
+    offline_regions_screen.dart          # Offline region management
   services/
-    map_service.dart           # Map provider abstraction
-    location_service.dart      # GPS location handling
-    offline_manager.dart       # Tile downloading and cache management
-    gpx_service.dart           # GPX import/export/recording
+    map_service.dart                     # Map provider abstraction
+    location_service.dart                # GPS location handling
+    offline_manager.dart                 # Offline tile management (MapLibre native API)
+    gpx_service.dart                     # GPX import/export/recording
+    route_storage_service.dart           # Route persistence (GPX files + JSON metadata)
+    connectivity_service.dart            # Network status detection
+    download_foreground_service.dart     # Android foreground service for downloads
+  widgets/
+    download_progress_overlay.dart       # Download progress UI overlay
   models/
-    route.dart                 # Route/track data model
-    waypoint.dart              # Waypoint data model
+    route.dart                           # Route/track data model
+    waypoint.dart                        # Waypoint data model
   utils/
-    tile_calculator.dart       # Tile math (bbox to tile indices, etc.)
+    tile_calculator.dart                 # Tile math (bbox to tile indices, etc.)
 scripts/
-  setup_env.sh                 # Cloud environment setup (Flutter + Android SDK + Gradle proxy)
-  gradle_proxy.py              # Local proxy for Gradle in cloud environments
+  setup_env.sh                           # Cloud environment setup
+  gradle_proxy.py                        # Local proxy for Gradle in cloud environments
 docs/
-  ARCHITECTURE.md              # Technical architecture
-  DATA_SOURCES.md              # Italian geoportal endpoints
-  ROADMAP.md                   # Detailed feature roadmap
+  ARCHITECTURE.md                        # Technical architecture
+  DATA_SOURCES.md                        # Italian geoportal endpoints
+  ROADMAP.md                             # Detailed feature roadmap
 ```
 
 ## Tile Source
@@ -164,7 +173,7 @@ Mapbox tokens (Phase 5 only) go in:
 
 ### Build-test status
 - `flutter analyze` — clean (0 issues)
-- `flutter test` — 18 tests passed
+- `flutter test` — 55 tests passed
 - `flutter build apk --debug` — **builds successfully** (181MB debug APK). Requires Android SDK setup (automated by `scripts/setup_env.sh`).
 
 ### What's been fixed since initial code
@@ -181,44 +190,46 @@ Mapbox tokens (Phase 5 only) go in:
 4. **GPX import crashes**: Added comprehensive error handling with specific messages for permissions, file access, and format issues. File picker now filters to `.gpx` and `.xml` only. Validates empty track data. Errors display for 6 seconds.
 5. **Save recording crashes**: Added try-catch with validation (minimum 2 points), specific error messages for permissions/storage issues, and guaranteed GPS mode restoration in finally block. Mounted state checks before setState.
 
-### What's done (Phase 3 — offline tile download core)
-- `lib/utils/tile_calculator.dart`: Full implementation with:
-  - `BoundingBox` class for area definitions
-  - `TileCoord` class for tile coordinates
-  - `computeRouteBBox()` — compute bounding box from route points
-  - `computeBufferedBBox()` — expand bbox by buffer distance (for route corridors)
-  - `enumerateTileCoords()` — list all tile (x, y, z) coordinates for a bbox
-  - `estimateDownloadSize()` — estimate bytes for tile list
-  - `formatBytes()` — human-readable byte formatting
-- `lib/services/offline_manager.dart`: Full implementation with:
-  - `OfflineManager` class with MBTiles schema (SQLite)
-  - `downloadRegion()` — download tiles for bounding box with progress stream
+### What's done (Phase 3 — offline maps, complete)
+- `lib/services/offline_manager.dart`: Refactored to use MapLibre's native offline API:
+  - `downloadRegion()` — wraps `downloadOfflineRegion()` with progress stream
   - `downloadRouteRegion()` — download tiles for buffered route corridor
-  - Concurrent downloads (6 parallel requests) with timeout handling
-  - Fallback tile source (MapLibre demo tiles) if OpenFreeMap returns 403/404
-  - `cancelDownload()` — cancel ongoing download
-  - `listRegions()`, `deleteRegion()` — region management
-  - `getTotalStorageBytes()`, `getTotalTileCount()` — storage statistics
-  - `getTile()`, `isTileCached()` — tile retrieval for offline use
-  - `clearAll()` — clear all cached data
-- `DownloadProgress` class for progress reporting (tiles, bytes, percent, errors)
-- `OfflineRegion` class for region metadata (name, bounds, zoom range, size, date)
-- Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart`
+  - `listRegions()`, `deleteRegion()` — wraps native region management
+  - `estimateTileCount()`, `estimateSize()` — pre-download estimates
+  - `setOffline()` — force MapLibre into offline mode
+  - `clearAll()` — delete all offline regions
+  - Tiles stored in MapLibre's native cache, served automatically when offline
+- `lib/services/connectivity_service.dart`: Network status detection via `connectivity_plus`
+- `lib/services/download_foreground_service.dart`: Android foreground service wrapper
+  - Keeps app alive during downloads when screen is off or app is backgrounded
+  - Persistent notification with progress updates ("Downloading map tiles... 47%")
+  - Uses `flutter_foreground_task` with `dataSync` foreground service type
+  - WiFi wake lock prevents radio from sleeping during download
+- `lib/screens/offline_regions_screen.dart`: Region management UI
+  - List all downloaded regions with zoom range and tile count
+  - Delete individual regions or clear all
+  - Dark theme consistent with rest of app
+- `lib/widgets/download_progress_overlay.dart`: Map overlay during download
+  - Progress bar with percentage, cancel button
+  - Auto-dismisses on completion
+- `lib/screens/map_screen.dart`: Offline UI additions:
+  - Download button (cloud icon) in top-right control column
+  - Bottom sheet: "Download visible area", "Download around route", "Manage offline regions"
+  - Config dialog: name region, adjust zoom range (6–16), see tile count & size estimate
+  - Offline indicator chip (orange "Offline" badge) when no network
+  - Foreground service lifecycle tied to download start/stop/cancel
+- `lib/utils/tile_calculator.dart`: Tile math utilities (unchanged from earlier)
+- `android/app/src/main/AndroidManifest.xml`: Added `FOREGROUND_SERVICE_DATA_SYNC` permission and foreground task service declaration
+- Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart` (updated for new API)
 
 ### What needs to happen next
-1. **Complete device testing**: Re-test with fixed build on Redmi 14 to verify all issues resolved. Confirm accuracy circle visible, auto-follow indicator works, GPX import succeeds, recording save succeeds.
-2. **Add offline download UI** (Phase 3 completion):
-   - Region selection screen (map bbox selection or route selection)
-   - Download progress overlay with cancel button
-   - Region management screen (list, delete, storage stats)
-   - Integrate cached tiles with MapLibre (custom tile source)
-   - Offline indicator on map screen
-3. **Proceed to Phase 4**: WMS data (Italian orthophotos)
-
-### Phase 3 remaining work
-- UI for offline region selection and download progress
-- Integration with MapLibre to serve cached tiles
-- Offline indicator on map screen
+1. **Device testing**: Test Phase 3 offline download flow on Redmi 14:
+   - Download visible area → verify progress → verify tiles render in airplane mode
+   - Download around route → verify buffered area is cached
+   - Lock screen during download → verify foreground service keeps it alive
+   - Manage regions screen → verify list and delete work
+   - Offline indicator → verify it appears when network lost
+2. **Proceed to Phase 4**: WMS data (Italian orthophotos)
 
 ## Conventions
 
