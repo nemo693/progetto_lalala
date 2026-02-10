@@ -75,6 +75,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const _defaultLon = 11.35;
   static const _defaultZoom = 9.0;
 
+  // Rectangle drawing for offline download
+  bool _isDrawingRectangle = false;
+  LatLng? _rectangleStart;
+  LatLng? _rectangleEnd;
+  Fill? _rectangleFill;
+
   // Track last camera position so rebuilds don't reset the map view
   CameraPosition _lastCameraPosition = const CameraPosition(
     target: LatLng(_defaultLat, _defaultLon),
@@ -257,6 +263,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // User-initiated pan/zoom — disable auto-follow so the map stays put.
     if (_followingUser) {
       setState(() => _followingUser = false);
+    }
+  }
+
+  void _onMapClick(Point<double> point, LatLng latLng) {
+    if (_isDrawingRectangle) {
+      if (_rectangleStart == null) {
+        // First click: set start point
+        setState(() => _rectangleStart = latLng);
+      } else {
+        // Second click: set end point and show preview
+        setState(() => _rectangleEnd = latLng);
+        _drawRectanglePreview();
+      }
+    }
+  }
+
+  void _onMapLongClick(Point<double> point, LatLng latLng) {
+    // Long press cancels rectangle drawing
+    if (_isDrawingRectangle) {
+      _cancelRectangleDrawing();
     }
   }
 
@@ -689,13 +715,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             ),
             ListTile(
               leading: const Icon(Icons.crop_square, color: Colors.white70),
-              title: const Text('Download visible area',
+              title: const Text('Draw area to download',
                   style: TextStyle(color: Colors.white70)),
-              subtitle: const Text('Save current map view for offline use',
+              subtitle: const Text('Drag a rectangle on the map',
                   style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () {
                 Navigator.pop(ctx);
-                _configureVisibleAreaDownload();
+                _startDrawingRectangle();
               },
             ),
             if (_activeRoute != null)
@@ -728,25 +754,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _configureVisibleAreaDownload() async {
-    final controller = _mapProvider.controller;
-    if (controller == null) return;
-
-    // Get the actual visible bounds from the map controller
-    final visibleRegion = await controller.getVisibleRegion();
-    final bounds = BoundingBox(
-      minLat: visibleRegion.southwest.latitude,
-      minLon: visibleRegion.southwest.longitude,
-      maxLat: visibleRegion.northeast.latitude,
-      maxLon: visibleRegion.northeast.longitude,
-    );
-
-    _showDownloadConfigDialog(
-      bounds: bounds,
-      suggestedName: 'Map ${DateTime.now().toString().substring(0, 10)}',
-    );
-  }
-
   void _configureRouteDownload() {
     if (_activeRoute == null) return;
 
@@ -758,6 +765,133 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _showDownloadConfigDialog(
       bounds: buffered,
       suggestedName: _activeRoute!.name,
+    );
+  }
+
+  void _startDrawingRectangle() {
+    setState(() {
+      _isDrawingRectangle = true;
+      _rectangleStart = null;
+      _rectangleEnd = null;
+    });
+    _showRectangleInstructions();
+  }
+
+  void _showRectangleInstructions() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Tap two corners to draw download area. Long-press to cancel.',
+          style: TextStyle(fontSize: 13),
+        ),
+        backgroundColor: const Color(0xFF4A90D9),
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
+      ),
+    );
+  }
+
+  void _cancelRectangleDrawing() {
+    setState(() {
+      _isDrawingRectangle = false;
+      _rectangleStart = null;
+      _rectangleEnd = null;
+    });
+    _removeRectanglePreview();
+  }
+
+  Future<void> _drawRectanglePreview() async {
+    final start = _rectangleStart;
+    final end = _rectangleEnd;
+    if (start == null || end == null) return;
+
+    final controller = _mapProvider.controller;
+    if (controller == null) return;
+
+    // Remove old rectangle if any
+    _removeRectanglePreview();
+
+    // Draw semi-transparent rectangle fill
+    final corners = [
+      LatLng(start.latitude, start.longitude),
+      LatLng(start.latitude, end.longitude),
+      LatLng(end.latitude, end.longitude),
+      LatLng(end.latitude, start.longitude),
+      LatLng(start.latitude, start.longitude), // close the polygon
+    ];
+
+    _rectangleFill = await controller.addFill(
+      FillOptions(
+        geometry: [corners],
+        fillColor: '#4A90D9',
+        fillOpacity: 0.2,
+        fillOutlineColor: '#4A90D9',
+      ),
+    );
+
+    // Show confirm/cancel dialog
+    _showRectangleConfirmDialog();
+  }
+
+  void _removeRectanglePreview() {
+    final controller = _mapProvider.controller;
+    final fill = _rectangleFill;
+    if (controller != null && fill != null) {
+      controller.removeFill(fill);
+      _rectangleFill = null;
+    }
+  }
+
+  void _showRectangleConfirmDialog() {
+    final start = _rectangleStart;
+    final end = _rectangleEnd;
+    if (start == null || end == null) return;
+
+    final bounds = BoundingBox(
+      minLat: start.latitude < end.latitude ? start.latitude : end.latitude,
+      maxLat: start.latitude > end.latitude ? start.latitude : end.latitude,
+      minLon: start.longitude < end.longitude ? start.longitude : end.longitude,
+      maxLon: start.longitude > end.longitude ? start.longitude : end.longitude,
+    );
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Download this area?',
+            style: TextStyle(color: Colors.white70)),
+        content: Text(
+          'Area: ${bounds.minLat.toStringAsFixed(4)}, ${bounds.minLon.toStringAsFixed(4)} → ${bounds.maxLat.toStringAsFixed(4)}, ${bounds.maxLon.toStringAsFixed(4)}',
+          style: const TextStyle(color: Colors.white60, fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _cancelRectangleDrawing();
+            },
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _removeRectanglePreview();
+              setState(() {
+                _isDrawingRectangle = false;
+                _rectangleStart = null;
+                _rectangleEnd = null;
+              });
+              _showDownloadConfigDialog(
+                bounds: bounds,
+                suggestedName: 'Area ${DateTime.now().toString().substring(0, 10)}',
+              );
+            },
+            child: const Text('Configure'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1107,6 +1241,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _locationSub?.cancel();
     _connectivitySub?.cancel();
     _downloadProgressSub?.cancel();
+    _removeRectanglePreview();
     _locationService.dispose();
     _connectivityService.dispose();
     _mapProvider.dispose();
@@ -1128,6 +1263,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             onMapCreated: _onMapCreated,
             onStyleLoadedCallback: _onStyleLoaded,
             onCameraIdle: _onCameraIdle,
+            onMapClick: _onMapClick,
+            onMapLongClick: _onMapLongClick,
             rotateGesturesEnabled: true,
             tiltGesturesEnabled: false,
             compassEnabled: false,
@@ -1226,6 +1363,40 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     Text('Offline',
                         style: TextStyle(color: Colors.white70, fontSize: 11)),
                   ],
+                ),
+              ),
+            ),
+
+          // ── Drawing mode indicator: top-center ───────────────
+          if (_isDrawingRectangle)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4A90D9).withAlpha(230),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.crop_square, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        _rectangleStart == null
+                            ? 'Tap first corner'
+                            : 'Tap second corner',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
