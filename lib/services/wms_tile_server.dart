@@ -186,10 +186,20 @@ class WmsTileServer {
             .timeout(const Duration(seconds: 30));
 
         if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-          return response.bodyBytes;
+          // Verify the response is actually an image, not an XML error
+          final contentType = response.headers['content-type'] ?? '';
+          if (contentType.contains('image/')) {
+            return response.bodyBytes;
+          }
+          // Non-image response (e.g. XML ServiceException) — don't retry,
+          // it's a server-side issue that won't resolve on its own.
+          debugPrint('[WmsTileServer] WMS returned non-image content-type '
+              '"$contentType" for $z/$x/$y — not retrying');
+          return null;
+        } else {
+          debugPrint('[WmsTileServer] HTTP ${response.statusCode} for '
+              '$z/$x/$y (attempt ${attempt + 1})');
         }
-        debugPrint('[WmsTileServer] HTTP ${response.statusCode} for '
-            '$z/$x/$y (attempt ${attempt + 1})');
       } on TimeoutException {
         debugPrint(
             '[WmsTileServer] Timeout for $z/$x/$y (attempt ${attempt + 1})');
@@ -216,9 +226,25 @@ class WmsTileServer {
     final file = _cacheFile(sourceId, z, x, y);
     if (await file.exists()) {
       final bytes = await file.readAsBytes();
-      if (bytes.isNotEmpty) return bytes;
+      if (bytes.isNotEmpty && _isValidImage(bytes)) return bytes;
+      // Delete corrupted cache entry (e.g. XML error cached as .jpg)
+      if (bytes.isNotEmpty) {
+        debugPrint('[WmsTileServer] Removing corrupted cached tile $z/$x/$y');
+        try { await file.delete(); } catch (_) {}
+      }
     }
     return null;
+  }
+
+  /// Check if bytes look like a valid image (JPEG or PNG).
+  /// JPEG starts with FF D8 FF, PNG starts with 89 50 4E 47.
+  static bool _isValidImage(Uint8List bytes) {
+    if (bytes.length < 4) return false;
+    // JPEG magic bytes
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
+    // PNG magic bytes
+    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true;
+    return false;
   }
 
   static Future<void> _cacheTile(

@@ -84,7 +84,7 @@ void main() {
       final pcn = MapSource.pcnOrthophoto;
       expect(pcn.type, MapSourceType.wms);
       expect(pcn.wmsBaseUrl, isNotNull);
-      expect(pcn.wmsLayers, 'ortofoto_colore_12');
+      expect(pcn.wmsLayers, 'OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33');
       expect(pcn.wmsCrs, 'EPSG:3857');
       expect(pcn.wmsFormat, 'image/jpeg');
     });
@@ -93,10 +93,10 @@ void main() {
       final url = MapSource.pcnOrthophoto.buildWmsGetMapUrl(14, 8655, 5828);
 
       expect(url, contains('SERVICE=WMS'));
-      expect(url, contains('VERSION=1.3.0'));
+      expect(url, contains('VERSION=1.1.0'));
       expect(url, contains('REQUEST=GetMap'));
-      expect(url, contains('LAYERS=ortofoto_colore_12'));
-      expect(url, contains('CRS=EPSG:3857'));
+      expect(url, contains('LAYERS=OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33'));
+      expect(url, contains('SRS=EPSG:3857'));
       expect(url, contains('WIDTH=256'));
       expect(url, contains('HEIGHT=256'));
       expect(url, contains('FORMAT=image/jpeg'));

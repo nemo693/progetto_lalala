@@ -68,8 +68,7 @@ class _RoutesScreenState extends State<RoutesScreen> {
   Future<void> _importGpx() async {
     try {
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['gpx', 'xml'],
+        type: FileType.any,
         allowMultiple: false,
       );
 
@@ -80,6 +79,12 @@ class _RoutesScreenState extends State<RoutesScreen> {
 
       if (path == null || path.isEmpty) {
         _showError('Could not access file. Try copying it to Downloads folder.');
+        return;
+      }
+
+      final lowerPath = path.toLowerCase();
+      if (!lowerPath.endsWith('.gpx') && !lowerPath.endsWith('.xml')) {
+        _showError('Please select a .gpx or .xml file');
         return;
       }
 

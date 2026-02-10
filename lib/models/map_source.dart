@@ -77,10 +77,12 @@ class MapSource {
     assert(type == MapSourceType.wms, 'buildWmsGetMapUrl called on non-WMS source');
     final bbox = getTileEpsg3857BBox(z, x, y);
     final separator = wmsBaseUrl!.contains('?') ? '&' : '?';
+    // Use WMS 1.1.0 for consistent X,Y bbox order across all CRS.
+    // WMS 1.3.0 requires Y,X order for EPSG:3857, which is error-prone.
     return '$wmsBaseUrl$separator'
-        'SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'
+        'SERVICE=WMS&VERSION=1.1.0&REQUEST=GetMap'
         '&LAYERS=$wmsLayers'
-        '&CRS=$wmsCrs'
+        '&SRS=$wmsCrs'
         '&BBOX=${bbox.minX},${bbox.minY},${bbox.maxX},${bbox.maxY}'
         '&WIDTH=$tileSize&HEIGHT=$tileSize'
         '&FORMAT=$wmsFormat';
@@ -133,7 +135,7 @@ class MapSource {
     url: '',
     wmsBaseUrl:
         'http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map',
-    wmsLayers: 'ortofoto_colore_12',
+    wmsLayers: 'OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33',
     wmsCrs: 'EPSG:3857',
     wmsFormat: 'image/jpeg',
     attribution: '© PCN - Ministero dell\'Ambiente',
