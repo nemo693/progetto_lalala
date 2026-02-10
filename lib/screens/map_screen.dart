@@ -58,6 +58,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   StreamSubscription<DownloadProgress>? _downloadProgressSub;
   bool _isDownloading = false;
 
+  // True while a programmatic camera move is in flight (GPS follow, zoom-to-route, etc.).
+  // Used to distinguish user-initiated pans from code-initiated moves in _onCameraIdle.
+  bool _programmaticMove = false;
+
   // Default camera: centered on the Italian Alps (Dolomites area)
   static const _defaultLat = 46.5;
   static const _defaultLon = 11.35;
@@ -169,6 +173,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _moveCameraToPosition(Position pos) {
+    _programmaticMove = true;
     _mapProvider.setCamera(
       latitude: pos.latitude,
       longitude: pos.longitude,
@@ -210,26 +215,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (cam != null) {
       _lastCameraPosition = cam;
     }
-    // Disable auto-follow if user manually moved the camera
-    // (camera moves from position updates don't count)
-    if (_followingUser && _currentPosition != null) {
-      final controller = _mapProvider.controller;
-      if (controller != null) {
-        final cameraPos = controller.cameraPosition;
-        if (cameraPos != null) {
-          final userLat = _currentPosition!.latitude;
-          final userLon = _currentPosition!.longitude;
-          final cameraLat = cameraPos.target.latitude;
-          final cameraLon = cameraPos.target.longitude;
-
-          // If camera is more than ~100m away from user position, disable follow
-          final distLat = (cameraLat - userLat).abs();
-          final distLon = (cameraLon - userLon).abs();
-          if (distLat > 0.001 || distLon > 0.001) {
-            setState(() => _followingUser = false);
-          }
-        }
-      }
+    // If the camera move was programmatic (GPS follow, zoom-to-route, etc.)
+    // just clear the flag and don't touch follow mode.
+    if (_programmaticMove) {
+      _programmaticMove = false;
+      return;
+    }
+    // User-initiated pan/zoom — disable auto-follow so the map stays put.
+    if (_followingUser) {
+      setState(() => _followingUser = false);
     }
   }
 
@@ -249,6 +243,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _resetNorth() {
+    _programmaticMove = true;
     _mapProvider.resetNorth();
   }
 
@@ -302,6 +297,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     final controller = _mapProvider.controller;
     if (controller != null) {
+      _programmaticMove = true;
       controller.animateCamera(
         CameraUpdate.newLatLngBounds(
           LatLngBounds(

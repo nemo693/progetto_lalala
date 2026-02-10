@@ -277,12 +277,15 @@ class OfflineManager {
       final suffix = total > 1 ? ' (${source.name})' : '';
       final name = '$regionName$suffix';
 
+      // Resolve the style URL (raster sources need a file:// URL)
+      final styleUrl = await source.offlineStyleUrl;
+
       final stream = downloadRegion(
         regionName: name,
         bounds: bounds,
         minZoom: minZoom,
         maxZoom: maxZoom,
-        mapStyleUrl: source.styleString,
+        mapStyleUrl: styleUrl,
       );
 
       await for (final progress in stream) {

@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 // Available map tile sources for AlpineNav.
 // Vector sources use a remote style JSON URL directly.
 // Raster XYZ sources get wrapped in a dynamically generated MapLibre
@@ -114,5 +119,20 @@ class MapSource {
         '"maxzoom":19'
         '}]'
         '}';
+  }
+
+  /// Returns a URL that MapLibre's native offline API can use.
+  ///
+  /// Vector sources return the remote style URL directly.
+  /// Raster XYZ sources write the inline style JSON to a temp file
+  /// and return a file:// URL, because the native downloadOfflineRegion
+  /// API expects a URL, not an inline JSON string.
+  Future<String> get offlineStyleUrl async {
+    if (type == MapSourceType.vector) return url;
+
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/style_$id.json');
+    await file.writeAsString(_buildRasterStyleJson(), encoding: utf8);
+    return 'file://${file.path}';
   }
 }
