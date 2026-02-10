@@ -58,6 +58,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const _defaultLon = 11.35;
   static const _defaultZoom = 9.0;
 
+  // Track last camera position so rebuilds don't reset the map view
+  CameraPosition _lastCameraPosition = const CameraPosition(
+    target: LatLng(_defaultLat, _defaultLon),
+    zoom: _defaultZoom,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -166,6 +172,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   void _onCameraIdle() {
     _mapProvider.onCameraIdle();
+    // Remember camera position so widget rebuilds don't reset the view
+    final cam = _mapProvider.controller?.cameraPosition;
+    if (cam != null) {
+      _lastCameraPosition = cam;
+    }
     // Disable auto-follow if user manually moved the camera
     // (camera moves from position updates don't count)
     if (_followingUser && _currentPosition != null) {
@@ -286,9 +297,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           controller.moveCamera(CameraUpdate.newLatLng(cam.target));
         }
       }
+      // Disable auto-follow so the camera stays where it is instead of
+      // snapping back to the user's GPS position on the next location update.
       setState(() {
         _activeRoute = null;
         _activeWaypoints = [];
+        _followingUser = false;
       });
     }
   }
@@ -806,10 +820,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           // ── Map ──────────────────────────────────────────────
           MapLibreMap(
             styleString: MapLibreProvider.defaultStyleUrl,
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(_defaultLat, _defaultLon),
-              zoom: _defaultZoom,
-            ),
+            initialCameraPosition: _lastCameraPosition,
             onMapCreated: _onMapCreated,
             onStyleLoadedCallback: _onStyleLoaded,
             onCameraIdle: _onCameraIdle,
