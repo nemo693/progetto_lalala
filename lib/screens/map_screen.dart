@@ -1048,6 +1048,7 @@ class _RecordingStatsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final dist = (recorder.distance / 1000).toStringAsFixed(2);
     final gain = recorder.elevationGain.round();
+    final loss = recorder.elevationLoss.round();
     final elapsed = recorder.elapsed;
     final h = elapsed.inHours;
     final m = elapsed.inMinutes.remainder(60);
@@ -1064,7 +1065,7 @@ class _RecordingStatsBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        '$dist km  +${gain}m  $time  ${pts}pt',
+        '$dist km  +${gain}m  -${loss}m  $time  ${pts}pt',
         style: const TextStyle(
           color: Colors.white70,
           fontSize: 11,
