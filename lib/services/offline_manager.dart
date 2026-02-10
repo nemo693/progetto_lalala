@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
+import '../models/map_source.dart';
 import '../utils/tile_calculator.dart';
-import 'map_service.dart';
 
 /// Progress update during tile download.
 class DownloadProgress {
@@ -58,12 +58,13 @@ class OfflineManager {
   /// Download tiles for a bounding box at the given zoom range.
   ///
   /// Returns a stream of [DownloadProgress] updates.
-  /// Uses [MapLibreProvider.defaultStyleUrl] as the style to cache.
+  /// The [mapStyleUrl] specifies which style (and its tile sources) to cache.
   Stream<DownloadProgress> downloadRegion({
     required String regionName,
     required BoundingBox bounds,
     required int minZoom,
     required int maxZoom,
+    required String mapStyleUrl,
   }) {
     final controller = StreamController<DownloadProgress>();
 
@@ -82,7 +83,7 @@ class OfflineManager {
         southwest: ml.LatLng(bounds.minLat, bounds.minLon),
         northeast: ml.LatLng(bounds.maxLat, bounds.maxLon),
       ),
-      mapStyleUrl: MapLibreProvider.defaultStyleUrl,
+      mapStyleUrl: mapStyleUrl,
       minZoom: minZoom.toDouble(),
       maxZoom: maxZoom.toDouble(),
     );
@@ -148,6 +149,7 @@ class OfflineManager {
     required List<List<double>> coordinatePairs,
     required int minZoom,
     required int maxZoom,
+    required String mapStyleUrl,
     double bufferMeters = 5000,
   }) {
     final bbox = computeRouteBBox(coordinatePairs);
@@ -169,6 +171,7 @@ class OfflineManager {
       bounds: bufferedBBox,
       minZoom: minZoom,
       maxZoom: maxZoom,
+      mapStyleUrl: mapStyleUrl,
     );
   }
 
@@ -227,9 +230,102 @@ class OfflineManager {
     return tiles.length;
   }
 
-  /// Estimate download size in bytes (rough estimate: ~25KB per tile).
-  int estimateSize(int tileCount) {
-    return tileCount * 25000;
+  /// Estimate download size in bytes using source-specific tile size.
+  int estimateSize(int tileCount, {int bytesPerTile = 25000}) {
+    return tileCount * bytesPerTile;
+  }
+
+  /// Download tiles for multiple map sources in the same region.
+  ///
+  /// Each source is downloaded sequentially. Progress is reported as an
+  /// overall percentage across all sources.
+  Stream<DownloadProgress> downloadRegionMultiSource({
+    required String regionName,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+    required List<MapSource> sources,
+  }) {
+    final controller = StreamController<DownloadProgress>();
+
+    _downloadMultipleSources(
+      regionName: regionName,
+      bounds: bounds,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+      sources: sources,
+      controller: controller,
+    );
+
+    return controller.stream;
+  }
+
+  Future<void> _downloadMultipleSources({
+    required String regionName,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+    required List<MapSource> sources,
+    required StreamController<DownloadProgress> controller,
+  }) async {
+    final total = sources.length;
+
+    for (int i = 0; i < total; i++) {
+      if (controller.isClosed) return;
+
+      final source = sources[i];
+      final suffix = total > 1 ? ' (${source.name})' : '';
+      final name = '$regionName$suffix';
+
+      final stream = downloadRegion(
+        regionName: name,
+        bounds: bounds,
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        mapStyleUrl: source.styleString,
+      );
+
+      await for (final progress in stream) {
+        if (controller.isClosed) return;
+
+        // Scale progress: each source is 1/total of overall progress
+        final baseProgress = i / total;
+        final sourceContribution = progress.progressPercent / total;
+        final overallProgress = baseProgress + sourceContribution;
+
+        if (progress.isComplete && progress.error != null) {
+          // Source failed — report error but continue with next source
+          controller.add(DownloadProgress(
+            progressPercent: overallProgress,
+            error: '${source.name}: ${progress.error}',
+          ));
+        } else if (progress.isComplete && i == total - 1) {
+          // Last source completed
+          controller.add(const DownloadProgress(
+            progressPercent: 1.0,
+            isComplete: true,
+          ));
+          controller.close();
+        } else if (progress.isComplete) {
+          // Non-last source completed, emit progress but don't close
+          controller.add(DownloadProgress(
+            progressPercent: (i + 1) / total,
+          ));
+        } else {
+          controller.add(DownloadProgress(
+            progressPercent: overallProgress,
+          ));
+        }
+      }
+    }
+
+    if (!controller.isClosed) {
+      controller.add(const DownloadProgress(
+        progressPercent: 1.0,
+        isComplete: true,
+      ));
+      controller.close();
+    }
   }
 
   /// Clean up.

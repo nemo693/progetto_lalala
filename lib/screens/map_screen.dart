@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../main.dart' show offlineManager;
+import '../models/map_source.dart';
 import '../models/route.dart';
 import '../models/waypoint.dart' as model;
 import '../services/connectivity_service.dart';
 import '../services/download_foreground_service.dart';
 import '../services/map_service.dart';
+import '../services/map_source_preference.dart';
 import '../services/location_service.dart';
 import '../services/gpx_service.dart';
 import '../services/offline_manager.dart';
@@ -48,6 +50,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   // Recording UI update timer
   Timer? _recordingTimer;
 
+  // Map source
+  MapSource _currentMapSource = MapSource.openFreeMap;
+
   // Offline download state
   Stream<DownloadProgress>? _downloadStream;
   StreamSubscription<DownloadProgress>? _downloadProgressSub;
@@ -68,6 +73,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadMapSourcePreference();
     _initLocation();
     _initConnectivity();
   }
@@ -87,6 +93,25 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         if (_followingUser) _moveCameraToPosition(pos);
       }
     }
+  }
+
+  Future<void> _loadMapSourcePreference() async {
+    final source = await MapSourcePreference.load();
+    if (mounted && source.id != _currentMapSource.id) {
+      _mapProvider.setCurrentSource(source);
+      setState(() => _currentMapSource = source);
+    }
+  }
+
+  void _switchMapSource(MapSource source) {
+    if (source.id == _currentMapSource.id) return;
+    _mapProvider.clearLocationMarkerRefs();
+    _mapProvider.setCurrentSource(source);
+    setState(() {
+      _currentMapSource = source;
+      _styleLoaded = false;
+    });
+    MapSourcePreference.save(source);
   }
 
   Future<void> _initLocation() async {
@@ -534,7 +559,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   // ── Offline Download ─────────────────────────────────────────────────
 
-  void _showDownloadOptions() {
+  void _showLayersAndDownloadSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
@@ -542,7 +567,62 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Map source section ──
+            const Padding(
+              padding: EdgeInsets.only(left: 16, bottom: 4),
+              child: Text('MAP SOURCE',
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2)),
+            ),
+            ...MapSource.all.map((source) {
+              final isActive = source.id == _currentMapSource.id;
+              return ListTile(
+                leading: Icon(
+                  source.type == MapSourceType.vector
+                      ? Icons.map
+                      : (source.id == 'esri_imagery'
+                          ? Icons.satellite_alt
+                          : Icons.terrain),
+                  color: isActive
+                      ? const Color(0xFF4A90D9)
+                      : Colors.white70,
+                ),
+                title: Text(source.name,
+                    style: TextStyle(
+                      color: isActive
+                          ? const Color(0xFF4A90D9)
+                          : Colors.white70,
+                      fontWeight:
+                          isActive ? FontWeight.w600 : FontWeight.normal,
+                    )),
+                trailing: isActive
+                    ? const Icon(Icons.check,
+                        color: Color(0xFF4A90D9), size: 20)
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _switchMapSource(source);
+                },
+              );
+            }),
+
+            const Divider(color: Colors.white12),
+
+            // ── Offline section ──
+            const Padding(
+              padding: EdgeInsets.only(left: 16, bottom: 4),
+              child: Text('OFFLINE',
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2)),
+            ),
             ListTile(
               leading: const Icon(Icons.crop_square, color: Colors.white70),
               title: const Text('Download visible area',
@@ -561,13 +641,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     style: TextStyle(color: Colors.white70)),
                 subtitle: Text(
                     'Save tiles along ${_activeRoute!.name}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _configureRouteDownload();
                 },
               ),
-            const Divider(color: Colors.white12),
             ListTile(
               leading: const Icon(Icons.folder, color: Colors.white70),
               title: const Text('Manage offline regions',
@@ -623,96 +703,130 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final nameController = TextEditingController(text: suggestedName);
     int minZoom = 10;
     int maxZoom = 15;
+    final selectedSourceIds = <String>{_currentMapSource.id};
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          final tileCount = offlineManager.estimateTileCount(
+          final tilesPerSource = offlineManager.estimateTileCount(
             bounds, minZoom, maxZoom,
           );
-          final sizeEstimate = formatBytes(
-            offlineManager.estimateSize(tileCount),
-          );
+          int totalBytes = 0;
+          for (final srcId in selectedSourceIds) {
+            final src = MapSource.byId(srcId);
+            totalBytes += offlineManager.estimateSize(
+              tilesPerSource,
+              bytesPerTile: src.avgTileSizeBytes,
+            );
+          }
+          final totalTiles = tilesPerSource * selectedSourceIds.length;
+          final sizeEstimate = formatBytes(totalBytes);
 
           return AlertDialog(
             backgroundColor: const Color(0xFF1A1A2E),
             title: const Text('Download offline map',
                 style: TextStyle(color: Colors.white70)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameController,
-                  style: const TextStyle(color: Colors.white70),
-                  decoration: const InputDecoration(
-                    labelText: 'Region name',
-                    labelStyle: TextStyle(color: Colors.white38),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white54),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text('Min zoom: $minZoom',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                Slider(
-                  value: minZoom.toDouble(),
-                  min: 6,
-                  max: maxZoom.toDouble(),
-                  divisions: maxZoom - 6,
-                  label: '$minZoom',
-                  onChanged: (v) =>
-                      setDialogState(() => minZoom = v.round()),
-                ),
-                Text('Max zoom: $maxZoom',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                Slider(
-                  value: maxZoom.toDouble(),
-                  min: minZoom.toDouble(),
-                  max: 16,
-                  divisions: 16 - minZoom,
-                  label: '$maxZoom',
-                  onChanged: (v) =>
-                      setDialogState(() => maxZoom = v.round()),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.black26,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('~$tileCount tiles',
-                          style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                              fontFamily: 'monospace')),
-                      Text('~$sizeEstimate',
-                          style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                              fontFamily: 'monospace')),
-                    ],
-                  ),
-                ),
-                if (tileCount > 10000)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Large download. Consider reducing zoom range.',
-                      style: TextStyle(
-                          color: Colors.orange.shade300, fontSize: 11),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    style: const TextStyle(color: Colors.white70),
+                    decoration: const InputDecoration(
+                      labelText: 'Region name',
+                      labelStyle: TextStyle(color: Colors.white38),
+                      enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white54),
+                      ),
                     ),
                   ),
-              ],
+                  const SizedBox(height: 20),
+                  Text('Min zoom: $minZoom',
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12)),
+                  Slider(
+                    value: minZoom.toDouble(),
+                    min: 6,
+                    max: maxZoom.toDouble(),
+                    divisions: maxZoom - 6,
+                    label: '$minZoom',
+                    onChanged: (v) =>
+                        setDialogState(() => minZoom = v.round()),
+                  ),
+                  Text('Max zoom: $maxZoom',
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12)),
+                  Slider(
+                    value: maxZoom.toDouble(),
+                    min: minZoom.toDouble(),
+                    max: 16,
+                    divisions: 16 - minZoom,
+                    label: '$maxZoom',
+                    onChanged: (v) =>
+                        setDialogState(() => maxZoom = v.round()),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Sources to cache:',
+                      style:
+                          TextStyle(color: Colors.white54, fontSize: 12)),
+                  ...MapSource.all.map((source) => CheckboxListTile(
+                        dense: true,
+                        value: selectedSourceIds.contains(source.id),
+                        onChanged: (checked) {
+                          setDialogState(() {
+                            if (checked == true) {
+                              selectedSourceIds.add(source.id);
+                            } else if (selectedSourceIds.length > 1) {
+                              selectedSourceIds.remove(source.id);
+                            }
+                          });
+                        },
+                        title: Text(source.name,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 13)),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: const Color(0xFF4A90D9),
+                      )),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('~$totalTiles tiles',
+                            style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontFamily: 'monospace')),
+                        Text('~$sizeEstimate',
+                            style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontFamily: 'monospace')),
+                      ],
+                    ),
+                  ),
+                  if (totalTiles > 10000)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Large download. Consider reducing zoom range.',
+                        style: TextStyle(
+                            color: Colors.orange.shade300, fontSize: 11),
+                      ),
+                    ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -729,6 +843,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     bounds: bounds,
                     minZoom: minZoom,
                     maxZoom: maxZoom,
+                    sourceIds: selectedSourceIds,
                   );
                 },
                 child: const Text('Download'),
@@ -745,15 +860,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     required BoundingBox bounds,
     required int minZoom,
     required int maxZoom,
+    required Set<String> sourceIds,
   }) async {
     // Start foreground service so download survives screen-off / app switch
     await DownloadForegroundService.start();
 
-    final stream = offlineManager.downloadRegion(
+    final sources = sourceIds.map((id) => MapSource.byId(id)).toList();
+
+    final stream = offlineManager.downloadRegionMultiSource(
       regionName: name,
       bounds: bounds,
       minZoom: minZoom,
       maxZoom: maxZoom,
+      sources: sources,
     );
 
     final broadcastStream = stream.asBroadcastStream();
@@ -821,7 +940,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         children: [
           // ── Map ──────────────────────────────────────────────
           MapLibreMap(
-            styleString: MapLibreProvider.defaultStyleUrl,
+            styleString: _currentMapSource.styleString,
             initialCameraPosition: _lastCameraPosition,
             onMapCreated: _onMapCreated,
             onStyleLoadedCallback: _onStyleLoaded,
@@ -860,9 +979,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 _ControlButton(
-                  icon: Icons.cloud_download,
-                  tooltip: 'Offline maps',
-                  onPressed: _showDownloadOptions,
+                  icon: Icons.layers,
+                  tooltip: 'Map layers & offline',
+                  onPressed: _showLayersAndDownloadSheet,
                 ),
               ],
             ),

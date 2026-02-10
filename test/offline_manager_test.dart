@@ -73,11 +73,17 @@ void main() {
       expect(count, greaterThan(0));
     });
 
-    test('estimateSize returns 25KB per tile', () {
+    test('estimateSize returns 25KB per tile by default', () {
       final manager = OfflineManager();
       expect(manager.estimateSize(100), 2500000);
       expect(manager.estimateSize(0), 0);
       expect(manager.estimateSize(1), 25000);
+    });
+
+    test('estimateSize respects custom bytesPerTile', () {
+      final manager = OfflineManager();
+      expect(manager.estimateSize(100, bytesPerTile: 50000), 5000000);
+      expect(manager.estimateSize(10, bytesPerTile: 40000), 400000);
     });
   });
 }

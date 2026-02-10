@@ -2,6 +2,8 @@ import 'dart:math' as math;
 import 'dart:ui' show Offset;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
+import '../models/map_source.dart';
+
 /// Abstract interface for map operations.
 ///
 /// The UI layer depends on this interface, not on MapLibre directly.
@@ -73,14 +75,17 @@ class MapLibreProvider implements MapProvider {
     return px.clamp(4.0, 500.0);
   }
 
-  /// Style URLs — OpenFreeMap bright is the primary; MapLibre demo tiles as
-  /// fallback in case OpenFreeMap is temporarily down.
-  static const defaultStyleUrl =
-      'https://tiles.openfreemap.org/styles/bright';
-
   /// Fallback style URL (MapLibre demo tiles — low-res but always available).
   static const fallbackStyleUrl =
       'https://demotiles.maplibre.org/style.json';
+
+  /// The currently active map source.
+  MapSource _currentSource = MapSource.openFreeMap;
+  MapSource get currentSource => _currentSource;
+
+  void setCurrentSource(MapSource source) {
+    _currentSource = source;
+  }
 
   /// Bind to the controller after map creation.
   void attach(MapLibreMapController controller) {
