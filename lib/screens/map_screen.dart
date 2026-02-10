@@ -734,10 +734,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 children: [
                   TextField(
                     controller: nameController,
+                    autofocus: true,
                     style: const TextStyle(color: Colors.white70),
                     decoration: const InputDecoration(
                       labelText: 'Region name',
                       labelStyle: TextStyle(color: Colors.white38),
+                      hintText: 'e.g. Dolomiti West',
+                      hintStyle: TextStyle(color: Colors.white24),
                       enabledBorder: UnderlineInputBorder(
                         borderSide: BorderSide(color: Colors.white24),
                       ),

@@ -207,6 +207,12 @@ class OfflineManager {
     }).toList();
   }
 
+  /// Rename an offline region by updating its metadata.
+  Future<void> renameRegion(int regionId, String newName) async {
+    if (!_initialized) return;
+    await ml.updateOfflineRegionMetadata(regionId, {'name': newName});
+  }
+
   /// Delete an offline region by its native ID.
   Future<void> deleteRegion(int regionId) async {
     if (!_initialized) return;

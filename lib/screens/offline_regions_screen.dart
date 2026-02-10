@@ -45,6 +45,49 @@ class _OfflineRegionsScreenState extends State<OfflineRegionsScreen> {
     }
   }
 
+  Future<void> _renameRegion(OfflineRegion region) async {
+    final controller = TextEditingController(text: region.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Rename region',
+            style: TextStyle(color: Colors.white70)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white70),
+          decoration: const InputDecoration(
+            hintText: 'e.g. Dolomiti West',
+            hintStyle: TextStyle(color: Colors.white24),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white24),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.blue),
+            ),
+          ),
+          onSubmitted: (value) => Navigator.pop(ctx, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.isNotEmpty && newName != region.name) {
+      await offlineManager.renameRegion(region.id, newName);
+      _loadRegions();
+    }
+  }
+
   Future<void> _deleteRegion(OfflineRegion region) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -165,6 +208,7 @@ class _OfflineRegionsScreenState extends State<OfflineRegionsScreen> {
                         itemCount: _regions!.length,
                         itemBuilder: (ctx, i) => _RegionListItem(
                           region: _regions![i],
+                          onRename: () => _renameRegion(_regions![i]),
                           onDelete: () => _deleteRegion(_regions![i]),
                         ),
                       ),
@@ -177,9 +221,14 @@ class _OfflineRegionsScreenState extends State<OfflineRegionsScreen> {
 
 class _RegionListItem extends StatelessWidget {
   final OfflineRegion region;
+  final VoidCallback onRename;
   final VoidCallback onDelete;
 
-  const _RegionListItem({required this.region, required this.onDelete});
+  const _RegionListItem({
+    required this.region,
+    required this.onRename,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +273,12 @@ class _RegionListItem extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined,
+                color: Colors.white24, size: 20),
+            onPressed: onRename,
+            tooltip: 'Rename',
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline,
