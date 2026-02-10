@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' show Point;
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
@@ -30,7 +29,6 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _mapProvider = MapLibreProvider();
   final _locationService = LocationService();
-  final _gpxService = GpxService();
   final _storage = RouteStorageService();
   final _recorder = TrackRecorder();
   final _connectivityService = ConnectivityService();
@@ -210,64 +208,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _mapProvider.resetNorth();
   }
 
-  // ── GPX Import ─────────────────────────────────────────────────────────
-
-  Future<void> _importGpx() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['gpx', 'xml'],
-        allowMultiple: false,
-      );
-
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.single;
-      final path = file.path;
-
-      if (path == null || path.isEmpty) {
-        if (mounted) {
-          setState(() => _locationError = 'Could not access file. Try copying it to Downloads folder.');
-        }
-        return;
-      }
-
-      // Import and save
-      final imported = await _gpxService.importFromFile(path);
-
-      if (imported.route.points.isEmpty) {
-        if (mounted) {
-          setState(() => _locationError = 'GPX file contains no track points');
-        }
-        return;
-      }
-
-      await _storage.saveRoute(imported.route, imported.waypoints);
-      _showRoute(imported.route, imported.waypoints);
-
-    } catch (e) {
-      if (mounted) {
-        // Provide more specific error messages
-        String errorMsg = 'Failed to import GPX';
-        if (e.toString().contains('Permission')) {
-          errorMsg = 'Storage permission denied. Check app settings.';
-        } else if (e.toString().contains('FileSystemException')) {
-          errorMsg = 'Could not read file. Try moving it to Downloads.';
-        } else if (e.toString().contains('FormatException') || e.toString().contains('XmlParserException')) {
-          errorMsg = 'Invalid GPX file format';
-        } else {
-          errorMsg = 'Failed to import: ${e.toString().split('\n').first}';
-        }
-
-        setState(() => _locationError = errorMsg);
-        // Clear error after 6 seconds (longer for reading)
-        Future.delayed(const Duration(seconds: 6), () {
-          if (mounted) setState(() => _locationError = null);
-        });
-      }
-    }
-  }
-
   void _showRoute(NavRoute route, List<model.Waypoint> waypoints) {
     // Remove previous route display
     _clearRouteDisplay();
@@ -337,6 +277,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_activeRoute != null) {
       _mapProvider.removeLayer('active_route');
       _mapProvider.removeWaypointMarkers('active_waypoints');
+      // Nudge the camera to force MapLibre to redraw after layer removal,
+      // otherwise the track visually lingers until the next user interaction.
+      final controller = _mapProvider.controller;
+      if (controller != null) {
+        final cam = controller.cameraPosition;
+        if (cam != null) {
+          controller.moveCamera(CameraUpdate.newLatLng(cam.target));
+        }
+      }
       setState(() {
         _activeRoute = null;
         _activeWaypoints = [];
@@ -892,12 +841,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 _ControlButton(
-                  icon: Icons.folder_open,
-                  tooltip: 'Import GPX',
-                  onPressed: _importGpx,
-                ),
-                const SizedBox(height: 8),
-                _ControlButton(
                   icon: Icons.list,
                   tooltip: 'Routes',
                   onPressed: _openRoutesList,
@@ -1132,49 +1075,58 @@ class _RouteInfoChip extends StatelessWidget {
     final distKm = (route.distance / 1000).toStringAsFixed(1);
     final gain = route.elevationGain.round();
     final loss = route.elevationLoss.round();
+    // Leave room for right-side controls and padding
+    final maxWidth = MediaQuery.of(context).size.width - 80;
 
-    return Container(
-      padding: const EdgeInsets.only(left: 10, top: 6, bottom: 6, right: 4),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                route.name,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.only(left: 10, top: 6, bottom: 6, right: 4),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    route.name,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$distKm km  +${gain}m  -${loss}m',
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                '$distKm km  +${gain}m  -${loss}m',
-                style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-          SizedBox(
-            width: 28,
-            height: 28,
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              icon: const Icon(Icons.close, color: Colors.white38, size: 16),
-              onPressed: onClose,
             ),
-          ),
-        ],
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.close, color: Colors.white38, size: 16),
+                onPressed: onClose,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

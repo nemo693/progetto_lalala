@@ -1,5 +1,7 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/route.dart';
+import '../services/gpx_service.dart';
 import '../services/route_storage_service.dart';
 
 /// Screen for managing saved routes: list, view stats, delete, export.
@@ -12,8 +14,10 @@ class RoutesScreen extends StatefulWidget {
 
 class _RoutesScreenState extends State<RoutesScreen> {
   final _storage = RouteStorageService();
+  final _gpxService = GpxService();
   List<NavRoute>? _routes;
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -61,6 +65,60 @@ class _RoutesScreenState extends State<RoutesScreen> {
     }
   }
 
+  Future<void> _importGpx() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['gpx', 'xml'],
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.single;
+      final path = file.path;
+
+      if (path == null || path.isEmpty) {
+        _showError('Could not access file. Try copying it to Downloads folder.');
+        return;
+      }
+
+      final imported = await _gpxService.importFromFile(path);
+
+      if (imported.route.points.isEmpty) {
+        _showError('GPX file contains no track points');
+        return;
+      }
+
+      await _storage.saveRoute(imported.route, imported.waypoints);
+
+      // Return the imported route to the map immediately
+      if (mounted) {
+        Navigator.pop(context, imported.route);
+      }
+    } catch (e) {
+      String errorMsg = 'Failed to import GPX';
+      if (e.toString().contains('Permission')) {
+        errorMsg = 'Storage permission denied. Check app settings.';
+      } else if (e.toString().contains('FileSystemException')) {
+        errorMsg = 'Could not read file. Try moving it to Downloads.';
+      } else if (e.toString().contains('FormatException') || e.toString().contains('XmlParserException')) {
+        errorMsg = 'Invalid GPX file format';
+      } else {
+        errorMsg = 'Failed to import: ${e.toString().split('\n').first}';
+      }
+      _showError(errorMsg);
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() => _error = message);
+    Future.delayed(const Duration(seconds: 6), () {
+      if (mounted) setState(() => _error = null);
+    });
+  }
+
   void _viewOnMap(NavRoute route) {
     // Pop back to map screen with the selected route
     Navigator.pop(context, route);
@@ -74,8 +132,29 @@ class _RoutesScreenState extends State<RoutesScreen> {
         backgroundColor: const Color(0xFF1A1A2E),
         title: const Text('Routes', style: TextStyle(color: Colors.white70)),
         iconTheme: const IconThemeData(color: Colors.white70),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.folder_open, color: Colors.white70),
+            tooltip: 'Import GPX file',
+            onPressed: _importGpx,
+          ),
+        ],
       ),
-      body: _loading
+      body: Column(
+        children: [
+          if (_error != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.red.shade900.withAlpha(200),
+              child: Text(
+                _error!,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          Expanded(
+            child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _routes == null || _routes!.isEmpty
               ? const Center(
@@ -93,6 +172,9 @@ class _RoutesScreenState extends State<RoutesScreen> {
                     onDelete: () => _deleteRoute(_routes![i]),
                   ),
                 ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -115,6 +197,10 @@ class _RouteListItem extends StatelessWidget {
     final lossM = route.elevationLoss.round();
     final dur = _formatDuration(route.duration);
     final source = route.source == RouteSource.recorded ? 'REC' : 'GPX';
+    final date = _formatDate(route.createdAt);
+    final eleRange = route.minElevation != null && route.maxElevation != null
+        ? '${route.minElevation!.round()}–${route.maxElevation!.round()}m'
+        : null;
 
     return InkWell(
       onTap: onTap,
@@ -168,11 +254,20 @@ class _RouteListItem extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '$distKm km  +${gainM}m  -${lossM}m  $dur',
+                    '$distKm km  +${gainM}m  -${lossM}m  $dur'
+                    '${eleRange != null ? '  $eleRange' : ''}',
                     style: const TextStyle(
                       color: Colors.white38,
                       fontSize: 12,
                       fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    date,
+                    style: const TextStyle(
+                      color: Colors.white24,
+                      fontSize: 11,
                     ),
                   ),
                 ],
@@ -194,5 +289,16 @@ class _RouteListItem extends StatelessWidget {
     final m = d.inMinutes.remainder(60);
     if (h > 0) return '${h}h ${m}m';
     return '${m}m';
+  }
+
+  String _formatDate(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) return 'Today';
+    if (diff.inDays == 1) return 'Yesterday';
+    if (diff.inDays < 7) return '${diff.inDays} days ago';
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    return '$d/$m/${dt.year}';
   }
 }
