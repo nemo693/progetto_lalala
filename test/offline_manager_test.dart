@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:alpinenav/models/map_source.dart';
 import 'package:alpinenav/services/offline_manager.dart';
 import 'package:alpinenav/utils/tile_calculator.dart';
 
@@ -44,6 +45,7 @@ void main() {
         ),
         minZoom: 8,
         maxZoom: 14,
+        styleUrl: 'https://tiles.openfreemap.org/styles/bright',
       );
 
       expect(region.id, 1);
@@ -52,6 +54,33 @@ void main() {
       expect(region.bounds.maxLon, 12.5);
       expect(region.minZoom, 8);
       expect(region.maxZoom, 14);
+      expect(region.styleUrl, 'https://tiles.openfreemap.org/styles/bright');
+    });
+
+    test('matchesSource returns true for matching vector source', () {
+      const region = OfflineRegion(
+        id: 1,
+        name: 'Test',
+        bounds: BoundingBox(minLat: 46, minLon: 11, maxLat: 47, maxLon: 12),
+        minZoom: 8,
+        maxZoom: 14,
+        styleUrl: 'https://tiles.openfreemap.org/styles/bright',
+      );
+      expect(region.matchesSource(MapSource.openFreeMap), true);
+      expect(region.matchesSource(MapSource.esriWorldImagery), false);
+    });
+
+    test('matchesSource returns true for matching raster source', () {
+      const region = OfflineRegion(
+        id: 2,
+        name: 'Test Satellite',
+        bounds: BoundingBox(minLat: 46, minLon: 11, maxLat: 47, maxLon: 12),
+        minZoom: 8,
+        maxZoom: 14,
+        styleUrl: 'http://127.0.0.1:12345/style/esri_imagery.json',
+      );
+      expect(region.matchesSource(MapSource.esriWorldImagery), true);
+      expect(region.matchesSource(MapSource.openFreeMap), false);
     });
   });
 

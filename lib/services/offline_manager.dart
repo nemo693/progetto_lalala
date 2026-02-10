@@ -30,6 +30,7 @@ class OfflineRegion {
   final BoundingBox bounds;
   final int minZoom;
   final int maxZoom;
+  final String styleUrl;
 
   const OfflineRegion({
     required this.id,
@@ -37,7 +38,21 @@ class OfflineRegion {
     required this.bounds,
     required this.minZoom,
     required this.maxZoom,
+    required this.styleUrl,
   });
+
+  /// Check if this region was downloaded for a given [MapSource].
+  ///
+  /// Vector sources match by direct URL comparison.
+  /// Raster sources match by checking if the style URL contains the source id
+  /// (local style server URLs have the format `/style/{id}.json`).
+  bool matchesSource(MapSource source) {
+    if (source.type == MapSourceType.vector) {
+      return styleUrl == source.url;
+    }
+    // Raster: local style server URL contains the source id
+    return styleUrl.contains('/style/${source.id}.');
+  }
 }
 
 /// Manages offline map regions using MapLibre's native offline API.
@@ -203,6 +218,7 @@ class OfflineManager {
         ),
         minZoom: r.definition.minZoom.round(),
         maxZoom: r.definition.maxZoom.round(),
+        styleUrl: r.definition.mapStyleUrl,
       );
     }).toList();
   }

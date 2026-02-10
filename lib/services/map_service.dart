@@ -332,7 +332,6 @@ class MapLibreProvider implements MapProvider {
 
     final sourceId = 'region_$id';
     final lineLayerId = 'region_${id}_line';
-    final fillLayerId = 'region_${id}_fill';
     final labelSourceId = 'region_${id}_label';
     final labelLayerId = 'region_${id}_label_layer';
 
@@ -364,17 +363,7 @@ class MapLibreProvider implements MapProvider {
 
     await c.addSource(sourceId, GeojsonSourceProperties(data: geojson));
 
-    // Semi-transparent fill
-    await c.addFillLayer(
-      sourceId,
-      fillLayerId,
-      const FillLayerProperties(
-        fillColor: '#4A90D9',
-        fillOpacity: 0.08,
-      ),
-    );
-
-    // Outline
+    // Outline only (no fill)
     await c.addLineLayer(
       sourceId,
       lineLayerId,
@@ -426,7 +415,6 @@ class MapLibreProvider implements MapProvider {
     if (c == null) return;
 
     for (final layerId in [
-      'region_${id}_fill',
       'region_${id}_line',
       'region_${id}_label_layer',
     ]) {

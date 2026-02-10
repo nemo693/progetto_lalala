@@ -119,6 +119,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _styleLoaded = false;
     });
     MapSourcePreference.save(source);
+    // Region boundaries are redrawn in _onStyleLoaded after the new style loads
   }
 
   Future<void> _initLocation() async {
@@ -976,6 +977,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     await _mapProvider.removeAllRegionBoundaries();
     final regions = await offlineManager.listRegions();
     for (final region in regions) {
+      if (!region.matchesSource(_currentMapSource)) continue;
       await _mapProvider.addRegionBoundary(
         region.id.toString(),
         region.bounds.minLat,
