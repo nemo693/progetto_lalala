@@ -15,6 +15,7 @@ import '../services/location_service.dart';
 import '../services/gpx_service.dart';
 import '../services/offline_manager.dart';
 import '../services/route_storage_service.dart';
+import '../services/wms_tile_server.dart';
 import '../utils/tile_calculator.dart';
 import '../widgets/download_progress_overlay.dart';
 import 'offline_regions_screen.dart';
@@ -61,6 +62,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   // Show offline region boundaries on the map
   bool _showRegionBoundaries = false;
 
+  // Resolved style string for WMS sources (needs tile server port).
+  // For non-WMS sources this is null and we use source.styleString directly.
+  String? _wmsResolvedStyle;
+
   // True while a programmatic camera move is in flight (GPS follow, zoom-to-route, etc.).
   // Used to distinguish user-initiated pans from code-initiated moves in _onCameraIdle.
   bool _programmaticMove = false;
@@ -105,17 +110,37 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _loadMapSourcePreference() async {
     final source = await MapSourcePreference.load();
     if (mounted && source.id != _currentMapSource.id) {
+      // For WMS sources, start the tile server to resolve the style
+      String? resolvedWmsStyle;
+      if (source.type == MapSourceType.wms) {
+        final port = await WmsTileServer.start();
+        WmsTileServer.registerSource(source);
+        resolvedWmsStyle = source.wmsStyleString(port);
+      }
       _mapProvider.setCurrentSource(source);
-      setState(() => _currentMapSource = source);
+      setState(() {
+        _currentMapSource = source;
+        _wmsResolvedStyle = resolvedWmsStyle;
+      });
     }
   }
 
-  void _switchMapSource(MapSource source) {
+  Future<void> _switchMapSource(MapSource source) async {
     if (source.id == _currentMapSource.id) return;
+
+    // For WMS sources, start the tile server and resolve the style
+    String? resolvedWmsStyle;
+    if (source.type == MapSourceType.wms) {
+      final port = await WmsTileServer.start();
+      WmsTileServer.registerSource(source);
+      resolvedWmsStyle = source.wmsStyleString(port);
+    }
+
     _mapProvider.clearLocationMarkerRefs();
     _mapProvider.setCurrentSource(source);
     setState(() {
       _currentMapSource = source;
+      _wmsResolvedStyle = resolvedWmsStyle;
       _styleLoaded = false;
     });
     MapSourcePreference.save(source);
@@ -567,12 +592,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1A1A2E),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.8,
+        expand: false,
+        builder: (ctx, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // ── Map source section ──
             const Padding(
               padding: EdgeInsets.only(left: 16, bottom: 4),
@@ -585,13 +617,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             ),
             ...MapSource.all.map((source) {
               final isActive = source.id == _currentMapSource.id;
+              IconData icon;
+              if (source.type == MapSourceType.vector) {
+                icon = Icons.map;
+              } else if (source.type == MapSourceType.wms) {
+                icon = Icons.photo_library;
+              } else if (source.id == 'esri_imagery') {
+                icon = Icons.satellite_alt;
+              } else {
+                icon = Icons.terrain;
+              }
               return ListTile(
                 leading: Icon(
-                  source.type == MapSourceType.vector
-                      ? Icons.map
-                      : (source.id == 'esri_imagery'
-                          ? Icons.satellite_alt
-                          : Icons.terrain),
+                  icon,
                   color: isActive
                       ? const Color(0xFF4A90D9)
                       : Colors.white70,
@@ -684,6 +722,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               },
             ),
           ],
+          ),
         ),
       ),
     );
@@ -911,17 +950,78 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // Start foreground service so download survives screen-off / app switch
     await DownloadForegroundService.start();
 
-    final sources = sourceIds.map((id) => MapSource.byId(id)).toList();
+    final allSources = sourceIds.map((id) => MapSource.byId(id)).toList();
+    // Split: base map sources use MapLibre native, WMS uses our downloader
+    final baseSources =
+        allSources.where((s) => s.type != MapSourceType.wms).toList();
+    final wmsSources =
+        allSources.where((s) => s.type == MapSourceType.wms).toList();
 
-    final stream = offlineManager.downloadRegionMultiSource(
-      regionName: name,
-      bounds: bounds,
-      minZoom: minZoom,
-      maxZoom: maxZoom,
-      sources: sources,
-    );
+    // Create a combined progress stream for base maps + WMS
+    final controller = StreamController<DownloadProgress>();
+    final totalPhases = (baseSources.isNotEmpty ? 1 : 0) + wmsSources.length;
+    int completedPhases = 0;
 
-    final broadcastStream = stream.asBroadcastStream();
+    Future<void> runDownloads() async {
+      // Phase 1: Base map tiles via MapLibre native API
+      if (baseSources.isNotEmpty) {
+        final baseStream = offlineManager.downloadRegionMultiSource(
+          regionName: name,
+          bounds: bounds,
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+          sources: baseSources,
+        );
+        await for (final p in baseStream) {
+          if (controller.isClosed) return;
+          final scaled = (completedPhases + p.progressPercent) / totalPhases;
+          if (p.isComplete && p.error == null) {
+            completedPhases++;
+          }
+          controller.add(DownloadProgress(
+            progressPercent: scaled,
+            isComplete: false,
+            error: p.error,
+          ));
+        }
+      }
+
+      // Phase 2+: WMS tiles via our own downloader
+      for (final wms in wmsSources) {
+        if (controller.isClosed) return;
+        final wmsStream = offlineManager.downloadWmsRegion(
+          wmsSource: wms,
+          regionName: '$name (${wms.name})',
+          bounds: bounds,
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+        );
+        await for (final p in wmsStream) {
+          if (controller.isClosed) return;
+          final scaled = (completedPhases + p.progressPercent) / totalPhases;
+          if (p.isComplete && p.error == null) {
+            completedPhases++;
+          }
+          controller.add(DownloadProgress(
+            progressPercent: scaled,
+            isComplete: false,
+            error: p.error,
+          ));
+        }
+      }
+
+      if (!controller.isClosed) {
+        controller.add(const DownloadProgress(
+          progressPercent: 1.0,
+          isComplete: true,
+        ));
+        controller.close();
+      }
+    }
+
+    runDownloads();
+
+    final broadcastStream = controller.stream.asBroadcastStream();
 
     // Listen to progress to update the foreground notification
     _downloadProgressSub = broadcastStream.listen((progress) {
@@ -1010,6 +1110,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _locationService.dispose();
     _connectivityService.dispose();
     _mapProvider.dispose();
+    WmsTileServer.stop();
     super.dispose();
   }
 
@@ -1022,7 +1123,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         children: [
           // ── Map ──────────────────────────────────────────────
           MapLibreMap(
-            styleString: _currentMapSource.styleString,
+            styleString: _wmsResolvedStyle ?? _currentMapSource.styleString,
             initialCameraPosition: _lastCameraPosition,
             onMapCreated: _onMapCreated,
             onStyleLoadedCallback: _onStyleLoaded,

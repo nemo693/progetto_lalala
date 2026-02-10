@@ -5,6 +5,7 @@ import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/map_source.dart';
 import '../utils/tile_calculator.dart';
+import 'wms_tile_server.dart';
 
 /// Progress update during tile download.
 class DownloadProgress {
@@ -367,6 +368,135 @@ class OfflineManager {
 
     // Stop the local style server (used for raster source downloads)
     await LocalStyleServer.stopAll();
+
+    if (!controller.isClosed) {
+      controller.add(const DownloadProgress(
+        progressPercent: 1.0,
+        isComplete: true,
+      ));
+      controller.close();
+    }
+  }
+
+  // ── WMS tile download ─────────────────────────────────────────────
+
+  /// Download WMS tiles for a bounding box, caching them to disk.
+  ///
+  /// Unlike base map downloads (which use MapLibre's native offline API),
+  /// WMS tiles are fetched individually via HTTP and stored in [WmsTileServer]'s
+  /// disk cache. They are served to MapLibre through the local tile proxy.
+  Stream<DownloadProgress> downloadWmsRegion({
+    required MapSource wmsSource,
+    required String regionName,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+  }) {
+    final controller = StreamController<DownloadProgress>();
+    _doWmsDownload(
+      wmsSource: wmsSource,
+      regionName: regionName,
+      bounds: bounds,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+      controller: controller,
+    );
+    return controller.stream;
+  }
+
+  Future<void> _doWmsDownload({
+    required MapSource wmsSource,
+    required String regionName,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+    required StreamController<DownloadProgress> controller,
+  }) async {
+    final tiles = enumerateTileCoords(
+      bbox: bounds,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+    );
+
+    debugPrint('[OfflineManager] WMS download: $regionName, '
+        '${tiles.length} tiles, zoom $minZoom-$maxZoom');
+
+    if (tiles.isEmpty) {
+      controller.add(const DownloadProgress(
+        progressPercent: 1.0,
+        isComplete: true,
+      ));
+      controller.close();
+      return;
+    }
+
+    int completed = 0;
+    int errors = 0;
+    // Limit concurrent requests to avoid overwhelming the WMS server
+    const maxConcurrent = 4;
+    final semaphore = StreamController<void>();
+    for (int i = 0; i < maxConcurrent; i++) {
+      semaphore.add(null);
+    }
+
+    final futures = <Future>[];
+
+    for (final tile in tiles) {
+      if (controller.isClosed) break;
+
+      // Wait for a semaphore slot
+      await semaphore.stream.first;
+
+      if (controller.isClosed) break;
+
+      final future = () async {
+        try {
+          // Skip if already cached
+          final cached = await WmsTileServer.isTileCached(
+            wmsSource.id, tile.z, tile.x, tile.y,
+          );
+          if (!cached) {
+            final bytes = await WmsTileServer.fetchWmsTile(
+              wmsSource, tile.z, tile.x, tile.y,
+            );
+            if (bytes != null) {
+              await WmsTileServer.cacheTile(
+                wmsSource.id, tile.z, tile.x, tile.y, bytes,
+              );
+            } else {
+              errors++;
+            }
+          }
+        } catch (e) {
+          debugPrint('[OfflineManager] WMS tile error ${tile.z}/${tile.x}/${tile.y}: $e');
+          errors++;
+        }
+
+        completed++;
+        if (!controller.isClosed) {
+          controller.add(DownloadProgress(
+            progressPercent: completed / tiles.length,
+            isComplete: completed >= tiles.length,
+            error: (completed >= tiles.length && errors > 0)
+                ? '$errors tiles failed to download'
+                : null,
+          ));
+          if (completed >= tiles.length) {
+            controller.close();
+          }
+        }
+
+        // Release semaphore slot
+        if (!semaphore.isClosed) {
+          semaphore.add(null);
+        }
+      }();
+
+      futures.add(future);
+    }
+
+    await Future.wait(futures);
+    await semaphore.close();
 
     if (!controller.isClosed) {
       controller.add(const DownloadProgress(

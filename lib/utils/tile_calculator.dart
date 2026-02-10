@@ -199,6 +199,25 @@ int estimateDownloadSize(List<TileCoord> tiles, {int avgTileSizeBytes = 25000}) 
   return tiles.length * avgTileSizeBytes;
 }
 
+/// Compute the EPSG:3857 (Web Mercator) bounding box for a tile coordinate.
+///
+/// Returns the bbox as (minX, minY, maxX, maxY) in meters.
+/// Used to construct WMS GetMap requests for a given tile.
+({double minX, double minY, double maxX, double maxY}) getTileEpsg3857BBox(
+    int z, int x, int y) {
+  const originShift = 20037508.342789244; // pi * 6378137.0
+  final tileCount = 1 << z; // 2^z
+  final tileSize = (2 * originShift) / tileCount;
+
+  final minX = -originShift + x * tileSize;
+  final maxX = minX + tileSize;
+  // Y is inverted: tile y=0 is at the top (north)
+  final maxY = originShift - y * tileSize;
+  final minY = maxY - tileSize;
+
+  return (minX: minX, minY: minY, maxX: maxX, maxY: maxY);
+}
+
 /// Format bytes as human-readable string.
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';

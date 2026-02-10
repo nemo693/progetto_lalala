@@ -2,19 +2,25 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../utils/tile_calculator.dart';
+
 // Available map tile sources for AlpineNav.
 // Vector sources use a remote style JSON URL directly.
 // Raster XYZ sources get wrapped in a dynamically generated MapLibre
 // style JSON document (MapLibre needs a full style, not a bare tile URL).
+// WMS sources are served via a local tile proxy (WmsTileServer).
 
-enum MapSourceType { vector, rasterXyz }
+enum MapSourceType { vector, rasterXyz, wms }
 
 /// Whether this source supports offline downloading.
 /// Some raster tile servers (e.g. OpenTopoMap) block bulk downloads.
+/// WMS sources use their own download path (via WmsTileServer cache).
 extension MapSourceOfflineSupport on MapSource {
   bool get supportsOfflineDownload {
     // OpenTopoMap rate-limits and blocks bulk tile requests
     if (id == 'opentopo') return false;
+    // WMS sources support offline via our own tile cache
+    if (type == MapSourceType.wms) return true;
     return true;
   }
 }
@@ -25,6 +31,7 @@ class MapSource {
   final MapSourceType type;
 
   /// For vector: the style JSON URL. For raster: the XYZ tile URL template.
+  /// For WMS: unused (use [wmsBaseUrl] instead).
   final String url;
 
   final String attribution;
@@ -35,6 +42,20 @@ class MapSource {
   /// Average bytes per tile, used for download size estimates.
   final int avgTileSizeBytes;
 
+  // ── WMS-specific fields ──────────────────────────────────────────
+
+  /// WMS endpoint base URL (e.g. the MapServer CGI URL).
+  final String? wmsBaseUrl;
+
+  /// WMS layer name(s) for GetMap requests.
+  final String? wmsLayers;
+
+  /// Coordinate reference system for WMS requests (default: EPSG:3857).
+  final String wmsCrs;
+
+  /// Image format for WMS responses (default: image/jpeg).
+  final String wmsFormat;
+
   const MapSource({
     required this.id,
     required this.name,
@@ -43,7 +64,27 @@ class MapSource {
     required this.attribution,
     this.tileSize = 256,
     this.avgTileSizeBytes = 25000,
+    this.wmsBaseUrl,
+    this.wmsLayers,
+    this.wmsCrs = 'EPSG:3857',
+    this.wmsFormat = 'image/jpeg',
   });
+
+  /// Build a WMS GetMap URL for the given tile coordinate.
+  ///
+  /// Only valid for [MapSourceType.wms] sources.
+  String buildWmsGetMapUrl(int z, int x, int y) {
+    assert(type == MapSourceType.wms, 'buildWmsGetMapUrl called on non-WMS source');
+    final bbox = getTileEpsg3857BBox(z, x, y);
+    final separator = wmsBaseUrl!.contains('?') ? '&' : '?';
+    return '$wmsBaseUrl$separator'
+        'SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'
+        '&LAYERS=$wmsLayers'
+        '&CRS=$wmsCrs'
+        '&BBOX=${bbox.minX},${bbox.minY},${bbox.maxX},${bbox.maxY}'
+        '&WIDTH=$tileSize&HEIGHT=$tileSize'
+        '&FORMAT=$wmsFormat';
+  }
 
   // ── Built-in sources ────────────────────────────────────────────
 
@@ -83,16 +124,37 @@ class MapSource {
     avgTileSizeBytes: 50000,
   );
 
-  /// All available sources, in display order.
+  // ── WMS sources ─────────────────────────────────────────────────
+
+  static const pcnOrthophoto = MapSource(
+    id: 'pcn_ortho',
+    name: 'Italy Orthophoto (PCN)',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map',
+    wmsLayers: 'ortofoto_colore_12',
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© PCN - Ministero dell\'Ambiente',
+    tileSize: 256,
+    avgTileSizeBytes: 60000,
+  );
+
+  /// All available map sources, in display order.
   static const List<MapSource> all = [
     openFreeMap,
     openTopoMap,
     esriWorldImagery,
+    pcnOrthophoto,
   ];
 
   /// Look up a source by id. Returns [openFreeMap] if not found.
   static MapSource byId(String id) {
-    return all.firstWhere((s) => s.id == id, orElse: () => openFreeMap);
+    for (final s in all) {
+      if (s.id == id) return s;
+    }
+    return openFreeMap;
   }
 
   // ── Style string for MapLibre ───────────────────────────────────
@@ -101,9 +163,42 @@ class MapSource {
   ///
   /// Vector sources return the URL directly. Raster XYZ sources return
   /// an inline JSON style document that MapLibre can parse.
+  /// WMS sources require [wmsStyleString] instead (needs the tile server port).
   String get styleString {
     if (type == MapSourceType.vector) return url;
+    if (type == MapSourceType.wms) {
+      // Caller should use wmsStyleString(port) instead.
+      // Return empty style as a safe fallback.
+      return '{"version":8,"name":"empty","sources":{},"layers":[]}';
+    }
     return _buildRasterStyleJson();
+  }
+
+  /// Build a MapLibre style string for a WMS source, using the local tile
+  /// server at the given [port] to proxy tile requests.
+  String wmsStyleString(int port) {
+    assert(type == MapSourceType.wms);
+    final tileUrl = 'http://127.0.0.1:$port/wms/$id/{z}/{x}/{y}.jpg';
+    final escapedAttribution = attribution.replaceAll('"', '\\"');
+    return '{'
+        '"version":8,'
+        '"name":"$name",'
+        '"sources":{'
+        '"raster-tiles":{'
+        '"type":"raster",'
+        '"tiles":["$tileUrl"],'
+        '"tileSize":$tileSize,'
+        '"attribution":"$escapedAttribution"'
+        '}'
+        '},'
+        '"layers":[{'
+        '"id":"raster-layer",'
+        '"type":"raster",'
+        '"source":"raster-tiles",'
+        '"minzoom":0,'
+        '"maxzoom":19'
+        '}]'
+        '}';
   }
 
   String _buildRasterStyleJson() {
