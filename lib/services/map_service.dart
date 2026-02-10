@@ -321,6 +321,135 @@ class MapLibreProvider implements MapProvider {
     );
   }
 
+  // Track region boundary layers so we can remove them
+  final Set<String> _regionLayerIds = {};
+
+  /// Add a rectangle outline for an offline region boundary.
+  Future<void> addRegionBoundary(String id, double minLat, double minLon,
+      double maxLat, double maxLon, String label) async {
+    final c = _controller;
+    if (c == null) return;
+
+    final sourceId = 'region_$id';
+    final lineLayerId = 'region_${id}_line';
+    final fillLayerId = 'region_${id}_fill';
+    final labelSourceId = 'region_${id}_label';
+    final labelLayerId = 'region_${id}_label_layer';
+
+    // Remove if already exists
+    await removeRegionBoundary(id);
+
+    // Polygon ring (closed): SW -> SE -> NE -> NW -> SW
+    final ring = [
+      [minLon, minLat],
+      [maxLon, minLat],
+      [maxLon, maxLat],
+      [minLon, maxLat],
+      [minLon, minLat],
+    ];
+
+    final geojson = {
+      'type': 'FeatureCollection',
+      'features': [
+        {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'Polygon',
+            'coordinates': [ring],
+          },
+          'properties': <String, dynamic>{},
+        },
+      ],
+    };
+
+    await c.addSource(sourceId, GeojsonSourceProperties(data: geojson));
+
+    // Semi-transparent fill
+    await c.addFillLayer(
+      sourceId,
+      fillLayerId,
+      const FillLayerProperties(
+        fillColor: '#4A90D9',
+        fillOpacity: 0.08,
+      ),
+    );
+
+    // Outline
+    await c.addLineLayer(
+      sourceId,
+      lineLayerId,
+      const LineLayerProperties(
+        lineColor: '#4A90D9',
+        lineWidth: 2.0,
+        lineOpacity: 0.6,
+        lineDasharray: [4, 3],
+      ),
+    );
+
+    // Label at center of region
+    final centerLat = (minLat + maxLat) / 2;
+    final centerLon = (minLon + maxLon) / 2;
+    final labelGeojson = {
+      'type': 'FeatureCollection',
+      'features': [
+        {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'Point',
+            'coordinates': [centerLon, centerLat],
+          },
+          'properties': {'label': label},
+        },
+      ],
+    };
+
+    await c.addSource(
+        labelSourceId, GeojsonSourceProperties(data: labelGeojson));
+    await c.addSymbolLayer(
+      labelSourceId,
+      labelLayerId,
+      const SymbolLayerProperties(
+        textField: [Expressions.get, 'label'],
+        textSize: 12,
+        textColor: '#4A90D9',
+        textHaloColor: '#000000',
+        textHaloWidth: 1,
+      ),
+    );
+
+    _regionLayerIds.add(id);
+  }
+
+  /// Remove a region boundary from the map.
+  Future<void> removeRegionBoundary(String id) async {
+    final c = _controller;
+    if (c == null) return;
+
+    for (final layerId in [
+      'region_${id}_fill',
+      'region_${id}_line',
+      'region_${id}_label_layer',
+    ]) {
+      try {
+        await c.removeLayer(layerId);
+      } catch (_) {}
+    }
+    for (final srcId in ['region_$id', 'region_${id}_label']) {
+      try {
+        await c.removeSource(srcId);
+      } catch (_) {}
+    }
+    _regionLayerIds.remove(id);
+  }
+
+  /// Remove all region boundaries from the map.
+  Future<void> removeAllRegionBoundaries() async {
+    final ids = Set<String>.from(_regionLayerIds);
+    for (final id in ids) {
+      await removeRegionBoundary(id);
+    }
+  }
+
   @override
   Future<void> resetNorth() async {
     final c = _controller;

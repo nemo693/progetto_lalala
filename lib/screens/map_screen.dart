@@ -58,6 +58,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   StreamSubscription<DownloadProgress>? _downloadProgressSub;
   bool _isDownloading = false;
 
+  // Show offline region boundaries on the map
+  bool _showRegionBoundaries = false;
+
   // True while a programmatic camera move is in flight (GPS follow, zoom-to-route, etc.).
   // Used to distinguish user-initiated pans from code-initiated moves in _onCameraIdle.
   bool _programmaticMove = false;
@@ -205,6 +208,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // Re-display active route if style reloaded
     if (_activeRoute != null) {
       _displayRoute(_activeRoute!, _activeWaypoints);
+    }
+    // Re-display region boundaries if they were showing
+    if (_showRegionBoundaries) {
+      _loadRegionBoundaries();
     }
   }
 
@@ -620,6 +627,28 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       letterSpacing: 1.2)),
             ),
             ListTile(
+              leading: Icon(
+                Icons.grid_on,
+                color: _showRegionBoundaries
+                    ? const Color(0xFF4A90D9)
+                    : Colors.white70,
+              ),
+              title: Text('Show downloaded regions',
+                  style: TextStyle(
+                    color: _showRegionBoundaries
+                        ? const Color(0xFF4A90D9)
+                        : Colors.white70,
+                  )),
+              trailing: _showRegionBoundaries
+                  ? const Icon(Icons.check,
+                      color: Color(0xFF4A90D9), size: 20)
+                  : null,
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleRegionBoundaries();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.crop_square, color: Colors.white70),
               title: const Text('Download visible area',
                   style: TextStyle(color: Colors.white70)),
@@ -925,6 +954,37 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _downloadStream = null;
       _isDownloading = false;
     });
+    // Refresh region boundaries if they're visible
+    if (_showRegionBoundaries) {
+      _loadRegionBoundaries();
+    }
+  }
+
+  Future<void> _toggleRegionBoundaries() async {
+    if (_showRegionBoundaries) {
+      // Hide
+      await _mapProvider.removeAllRegionBoundaries();
+      setState(() => _showRegionBoundaries = false);
+    } else {
+      // Show
+      await _loadRegionBoundaries();
+      setState(() => _showRegionBoundaries = true);
+    }
+  }
+
+  Future<void> _loadRegionBoundaries() async {
+    await _mapProvider.removeAllRegionBoundaries();
+    final regions = await offlineManager.listRegions();
+    for (final region in regions) {
+      await _mapProvider.addRegionBoundary(
+        region.id.toString(),
+        region.bounds.minLat,
+        region.bounds.minLon,
+        region.bounds.maxLat,
+        region.bounds.maxLon,
+        region.name,
+      );
+    }
   }
 
   Future<void> _openRegionsScreen() async {
@@ -932,6 +992,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => const OfflineRegionsScreen()),
     );
+    // Refresh boundaries if visible (user may have deleted regions)
+    if (_showRegionBoundaries) {
+      _loadRegionBoundaries();
+    }
   }
 
   @override
