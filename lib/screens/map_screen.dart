@@ -583,27 +583,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _configureVisibleAreaDownload() {
+  Future<void> _configureVisibleAreaDownload() async {
     final controller = _mapProvider.controller;
     if (controller == null) return;
 
-    final cameraPos = controller.cameraPosition;
-    if (cameraPos == null) return;
-
-    // Get visible bounds from current camera position
-    // Estimate bbox from center + zoom
-    final lat = cameraPos.target.latitude;
-    final lon = cameraPos.target.longitude;
-    final zoom = cameraPos.zoom;
-
-    // Approximate visible area based on zoom level
-    // At zoom 10, ~1 degree is visible; at zoom 15, ~0.03 degrees
-    final span = 360.0 / (1 << zoom.round()) * 2;
+    // Get the actual visible bounds from the map controller
+    final visibleRegion = await controller.getVisibleRegion();
     final bounds = BoundingBox(
-      minLat: lat - span / 2,
-      minLon: lon - span / 2,
-      maxLat: lat + span / 2,
-      maxLon: lon + span / 2,
+      minLat: visibleRegion.southwest.latitude,
+      minLon: visibleRegion.southwest.longitude,
+      maxLat: visibleRegion.northeast.latitude,
+      maxLon: visibleRegion.northeast.longitude,
     );
 
     _showDownloadConfigDialog(
