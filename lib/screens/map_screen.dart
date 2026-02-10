@@ -699,7 +699,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final nameController = TextEditingController(text: suggestedName);
     int minZoom = 10;
     int maxZoom = 15;
-    final selectedSourceIds = <String>{_currentMapSource.id};
+    // Default to current source if it supports offline, otherwise OpenFreeMap
+    final initialSource = _currentMapSource.supportsOfflineDownload
+        ? _currentMapSource.id
+        : MapSource.openFreeMap.id;
+    final selectedSourceIds = <String>{initialSource};
 
     showDialog(
       context: context,
@@ -771,24 +775,37 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   const Text('Sources to cache:',
                       style:
                           TextStyle(color: Colors.white54, fontSize: 12)),
-                  ...MapSource.all.map((source) => CheckboxListTile(
-                        dense: true,
-                        value: selectedSourceIds.contains(source.id),
-                        onChanged: (checked) {
-                          setDialogState(() {
-                            if (checked == true) {
-                              selectedSourceIds.add(source.id);
-                            } else if (selectedSourceIds.length > 1) {
-                              selectedSourceIds.remove(source.id);
+                  ...MapSource.all.map((source) {
+                    final canDownload = source.supportsOfflineDownload;
+                    return CheckboxListTile(
+                      dense: true,
+                      value: canDownload &&
+                          selectedSourceIds.contains(source.id),
+                      onChanged: canDownload
+                          ? (checked) {
+                              setDialogState(() {
+                                if (checked == true) {
+                                  selectedSourceIds.add(source.id);
+                                } else if (selectedSourceIds.length > 1) {
+                                  selectedSourceIds.remove(source.id);
+                                }
+                              });
                             }
-                          });
-                        },
-                        title: Text(source.name,
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 13)),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        activeColor: const Color(0xFF4A90D9),
-                      )),
+                          : null,
+                      title: Text(
+                        canDownload
+                            ? source.name
+                            : '${source.name} (no offline)',
+                        style: TextStyle(
+                          color:
+                              canDownload ? Colors.white70 : Colors.white30,
+                          fontSize: 13,
+                        ),
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      activeColor: const Color(0xFF4A90D9),
+                    );
+                  }),
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(10),

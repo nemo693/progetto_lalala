@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../models/map_source.dart';
@@ -99,36 +100,43 @@ class OfflineManager {
     String regionName,
     StreamController<DownloadProgress> controller,
   ) async {
+    debugPrint('[OfflineManager] Starting download: $regionName, '
+        'style=${definition.mapStyleUrl}, '
+        'zoom=${definition.minZoom}-${definition.maxZoom}');
     try {
       await ml.downloadOfflineRegion(
         definition,
         metadata: {'name': regionName},
         onEvent: (event) {
           if (controller.isClosed) return;
-          final typeName = event.runtimeType.toString();
-          if (typeName == 'Success') {
+          if (event is ml.Success) {
+            debugPrint('[OfflineManager] Download complete: $regionName');
             controller.add(const DownloadProgress(
               progressPercent: 1.0,
               isComplete: true,
             ));
             controller.close();
-          } else if (typeName == 'Error') {
-            controller.add(const DownloadProgress(
+          } else if (event is ml.Error) {
+            final errorMsg = event.cause.message ?? 'Unknown error';
+            debugPrint('[OfflineManager] Download error: $regionName — $errorMsg');
+            controller.add(DownloadProgress(
               progressPercent: 0,
               isComplete: true,
-              error: 'Download failed',
+              error: errorMsg,
             ));
             controller.close();
-          } else {
-            // InProgress — extract progress field
-            final progress = (event as dynamic).progress as double? ?? 0;
+          } else if (event is ml.InProgress) {
+            final progress = event.progress;
             controller.add(DownloadProgress(
               progressPercent: progress / 100.0,
             ));
+          } else {
+            debugPrint('[OfflineManager] Unknown event: ${event.runtimeType}');
           }
         },
       );
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[OfflineManager] Download exception: $regionName — $e\n$stack');
       if (!controller.isClosed) {
         controller.add(DownloadProgress(
           progressPercent: 0,
@@ -277,8 +285,21 @@ class OfflineManager {
       final suffix = total > 1 ? ' (${source.name})' : '';
       final name = '$regionName$suffix';
 
-      // Resolve the style URL (raster sources need a file:// URL)
-      final styleUrl = await source.offlineStyleUrl;
+      // Resolve the style URL (raster sources use a local HTTP server)
+      String styleUrl;
+      try {
+        styleUrl = await source.offlineStyleUrl;
+        debugPrint('[OfflineManager] Resolved style URL for ${source.name}: $styleUrl');
+      } catch (e) {
+        debugPrint('[OfflineManager] Failed to resolve style URL for ${source.name}: $e');
+        if (!controller.isClosed) {
+          controller.add(DownloadProgress(
+            progressPercent: (i + 1) / total,
+            error: '${source.name}: Failed to prepare style — $e',
+          ));
+        }
+        continue;
+      }
 
       final stream = downloadRegion(
         regionName: name,
@@ -322,6 +343,9 @@ class OfflineManager {
       }
     }
 
+    // Stop the local style server (used for raster source downloads)
+    await LocalStyleServer.stopAll();
+
     if (!controller.isClosed) {
       controller.add(const DownloadProgress(
         progressPercent: 1.0,
@@ -334,5 +358,6 @@ class OfflineManager {
   /// Clean up.
   void dispose() {
     _initialized = false;
+    LocalStyleServer.stopAll();
   }
 }
