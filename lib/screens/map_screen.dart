@@ -129,9 +129,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _moveCameraToPosition(pos);
     }
 
-    // Feed GPS fixes to the recorder
+    // Feed GPS fixes to the recorder and update the live track on the map
     if (_recorder.state == RecordingState.recording) {
-      _recorder.addPosition(pos);
+      final accepted = _recorder.addPosition(pos);
+      if (accepted && _recorder.points.length >= 2) {
+        _mapProvider.addTrackLayer(
+          'recording',
+          _recorder.points
+              .map((p) => [p.latitude, p.longitude])
+              .toList(),
+        );
+      }
     }
   }
 
@@ -411,6 +419,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _recordingTimer?.cancel();
     _recordingTimer = null;
 
+    // Remove the live recording track layer
+    _mapProvider.removeLayer('recording');
+
     final points = _recorder.stop();
     if (points.length < 2) {
       if (mounted) {
@@ -476,6 +487,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   void _discardRecording() {
     _recordingTimer?.cancel();
     _recordingTimer = null;
+    _mapProvider.removeLayer('recording');
     _recorder.stop();
 
     // Switch back to normal GPS
