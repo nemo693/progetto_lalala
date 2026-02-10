@@ -36,11 +36,23 @@ void main() {
       final stats0 = RouteStats.compute([]);
       expect(stats0.distance, 0);
       expect(stats0.elevationGain, 0);
+      expect(stats0.minElevation, isNull);
+      expect(stats0.maxElevation, isNull);
 
       final stats1 = RouteStats.compute([
         TrackPoint(latitude: 46.0, longitude: 11.0),
       ]);
       expect(stats1.distance, 0);
+      expect(stats1.minElevation, isNull);
+      expect(stats1.maxElevation, isNull);
+
+      // Single point WITH elevation should report it
+      final stats2 = RouteStats.compute([
+        TrackPoint(latitude: 46.0, longitude: 11.0, elevation: 1500),
+      ]);
+      expect(stats2.distance, 0);
+      expect(stats2.minElevation, 1500);
+      expect(stats2.maxElevation, 1500);
     });
 
     test('computes distance between two known points', () {
@@ -66,6 +78,18 @@ void main() {
       final stats = RouteStats.compute(points);
       expect(stats.elevationGain, 450); // +200 + 250
       expect(stats.elevationLoss, 50); // -50
+      expect(stats.minElevation, 1000);
+      expect(stats.maxElevation, 1400);
+    });
+
+    test('minElevation/maxElevation are null when no points have elevation', () {
+      final points = [
+        TrackPoint(latitude: 46.0, longitude: 11.0),
+        TrackPoint(latitude: 46.01, longitude: 11.0),
+      ];
+      final stats = RouteStats.compute(points);
+      expect(stats.minElevation, isNull);
+      expect(stats.maxElevation, isNull);
     });
 
     test('computes duration from timestamps', () {
@@ -101,6 +125,8 @@ void main() {
       expect(route.distance, greaterThan(0));
       expect(route.elevationGain, 100);
       expect(route.elevationLoss, 50);
+      expect(route.minElevation, 1000);
+      expect(route.maxElevation, 1100);
       expect(route.source, RouteSource.imported);
     });
 

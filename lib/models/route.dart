@@ -42,6 +42,8 @@ class NavRoute {
   final double distance; // meters
   final double elevationGain; // meters
   final double elevationLoss; // meters
+  final double? minElevation; // meters
+  final double? maxElevation; // meters
   final Duration duration;
   final RouteSource source;
   final DateTime createdAt;
@@ -55,6 +57,8 @@ class NavRoute {
     required this.distance,
     required this.elevationGain,
     required this.elevationLoss,
+    this.minElevation,
+    this.maxElevation,
     required this.duration,
     required this.source,
     required this.createdAt,
@@ -79,6 +83,8 @@ class NavRoute {
       distance: stats.distance,
       elevationGain: stats.elevationGain,
       elevationLoss: stats.elevationLoss,
+      minElevation: stats.minElevation,
+      maxElevation: stats.maxElevation,
       duration: stats.duration,
       source: source,
       createdAt: DateTime.now(),
@@ -96,17 +102,21 @@ class RouteStats {
   final double distance;
   final double elevationGain;
   final double elevationLoss;
+  final double? minElevation;
+  final double? maxElevation;
   final Duration duration;
 
   const RouteStats({
     required this.distance,
     required this.elevationGain,
     required this.elevationLoss,
+    this.minElevation,
+    this.maxElevation,
     required this.duration,
   });
 
   static RouteStats compute(List<TrackPoint> points) {
-    if (points.length < 2) {
+    if (points.isEmpty) {
       return const RouteStats(
         distance: 0,
         elevationGain: 0,
@@ -115,9 +125,22 @@ class RouteStats {
       );
     }
 
+    if (points.length == 1) {
+      return RouteStats(
+        distance: 0,
+        elevationGain: 0,
+        elevationLoss: 0,
+        minElevation: points.first.elevation,
+        maxElevation: points.first.elevation,
+        duration: Duration.zero,
+      );
+    }
+
     double totalDistance = 0;
     double gain = 0;
     double loss = 0;
+    double? minEle;
+    double? maxEle;
 
     for (int i = 1; i < points.length; i++) {
       totalDistance += _haversineMeters(
@@ -139,6 +162,15 @@ class RouteStats {
       }
     }
 
+    // Compute min/max elevation from all points with elevation data
+    for (final pt in points) {
+      final ele = pt.elevation;
+      if (ele != null) {
+        minEle = minEle == null ? ele : math.min(minEle, ele);
+        maxEle = maxEle == null ? ele : math.max(maxEle, ele);
+      }
+    }
+
     // Duration: time between first and last timestamped points
     Duration dur = Duration.zero;
     final firstTime = points.first.timestamp;
@@ -151,6 +183,8 @@ class RouteStats {
       distance: totalDistance,
       elevationGain: gain,
       elevationLoss: loss,
+      minElevation: minEle,
+      maxElevation: maxEle,
       duration: dur,
     );
   }

@@ -76,6 +76,8 @@ class RouteStorageService {
             distance: route.distance,
             elevationGain: route.elevationGain,
             elevationLoss: route.elevationLoss,
+            minElevation: route.minElevation,
+            maxElevation: route.maxElevation,
             duration: route.duration,
             source: meta['source'] == 'recorded'
                 ? RouteSource.recorded
@@ -94,6 +96,8 @@ class RouteStorageService {
             distance: route.distance,
             elevationGain: route.elevationGain,
             elevationLoss: route.elevationLoss,
+            minElevation: route.minElevation,
+            maxElevation: route.maxElevation,
             duration: route.duration,
             source: route.source,
             createdAt: route.createdAt,

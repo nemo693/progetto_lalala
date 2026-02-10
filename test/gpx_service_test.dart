@@ -57,6 +57,8 @@ void main() {
       expect(route.distance, greaterThan(0));
       expect(route.elevationGain, 1300); // 1200 → 1500 → 2500 = +1300
       expect(route.elevationLoss, 0);
+      expect(route.minElevation, 1200);
+      expect(route.maxElevation, 2500);
       expect(route.duration.inHours, 3); // 08:00 to 11:00
     });
 
@@ -79,6 +81,8 @@ void main() {
       expect(route.name, 'Via Ferrata');
       expect(route.points.length, 2);
       expect(route.elevationGain, 400);
+      expect(route.minElevation, 800);
+      expect(route.maxElevation, 1200);
     });
 
     test('uses fallback name when GPX has none', () async {

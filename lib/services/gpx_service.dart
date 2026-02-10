@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:gpx/gpx.dart';
@@ -218,10 +219,14 @@ class TrackRecorder {
   double _distance = 0;
   double _elevationGain = 0;
   double _elevationLoss = 0;
+  double? _minElevation;
+  double? _maxElevation;
 
   double get distance => _distance;
   double get elevationGain => _elevationGain;
   double get elevationLoss => _elevationLoss;
+  double? get minElevation => _minElevation;
+  double? get maxElevation => _maxElevation;
 
   /// Elapsed time excluding pauses.
   Duration get elapsed {
@@ -255,6 +260,8 @@ class TrackRecorder {
     _distance = 0;
     _elevationGain = 0;
     _elevationLoss = 0;
+    _minElevation = null;
+    _maxElevation = null;
     _pausedDuration = Duration.zero;
   }
 
@@ -293,6 +300,16 @@ class TrackRecorder {
       timestamp: pos.timestamp,
     );
 
+    // Update min/max elevation
+    if (point.elevation != null) {
+      _minElevation = _minElevation == null
+          ? point.elevation!
+          : math.min(_minElevation!, point.elevation!);
+      _maxElevation = _maxElevation == null
+          ? point.elevation!
+          : math.max(_maxElevation!, point.elevation!);
+    }
+
     // Update running stats
     if (_points.isNotEmpty) {
       final prev = _points.last;
@@ -324,6 +341,8 @@ class TrackRecorder {
       distance: _distance,
       elevationGain: _elevationGain,
       elevationLoss: _elevationLoss,
+      minElevation: _minElevation,
+      maxElevation: _maxElevation,
       duration: elapsed,
       source: RouteSource.recorded,
       createdAt: DateTime.now(),
