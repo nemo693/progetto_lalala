@@ -74,39 +74,54 @@ User enables orthophoto layer
 
 ### Tile Caching Strategy
 
-**Format**: MBTiles (SQLite database with tiles stored as blobs)
+**Implementation**: MapLibre Native Offline API (Phase 3, implemented Feb 2026)
 
-**Why MBTiles**:
-- Single file per region, easy to manage
-- SQLite is reliable on mobile
-- Standard format, compatible with QGIS and other tools
-- MapLibre supports MBTiles as a local tile source
-- Custom MBTiles gives us control over WMS caching and offline management
+**How it works**:
+- MapLibre GL Native has a built-in offline region API
+- `downloadOfflineRegion()` downloads tiles for a bounding box and zoom range
+- Tiles stored in MapLibre's internal SQLite cache (not MBTiles format, but similar)
+- Cached tiles served automatically when offline — no app code needed
+- `OfflineManager` wraps MapLibre's API with progress tracking and foreground service
 
-**Storage structure**:
+**Why MapLibre Native API** (vs custom MBTiles):
+- Zero-config: tiles served automatically from cache when offline
+- Native implementation: faster and more reliable than Dart-side SQLite
+- Progress callbacks: built-in download progress and completion events
+- Region management: list, delete, and query offline regions via SDK
+- Future-proof: MapLibre team maintains caching logic, handles format changes
+
+**Storage structure** (managed by MapLibre, not directly accessed by app):
 ```
 app_data/
-  tiles/
-    base_map/          # Vector tiles cached from OpenFreeMap
-    orthophoto/        # Cached WMS raster tiles
-      veneto_2024.mbtiles
-      trentino_2024.mbtiles
-    terrain/           # Terrain-RGB tiles for 3D
-  routes/
-    *.gpx              # Saved GPX files
-  db/
-    routes.sqlite      # Route metadata, stats
+  cache/
+    mbgl-offline.db    # MapLibre's native tile cache (SQLite)
+    mbgl-cache.db      # Runtime tile cache (separate from offline regions)
+  app_flutter/
+    routes/
+      *.gpx            # Saved GPX files
+    db/
+      routes.db        # Route metadata (RouteStorageService)
 ```
 
-**Tile download strategies**:
-1. **Manual region**: User draws rectangle on map, selects zoom range. Tiles within bbox downloaded.
-2. **Route buffer**: Given a GPX track, compute a buffer (e.g., 2km), calculate tile indices for the buffered bbox at each zoom level, download.
+**Tile download strategies** (implemented in `OfflineManager`):
+1. **Manual region** (`downloadRegion()`): User selects visible map area, configures zoom range (6–16), downloads all tiles in bbox
+2. **Route buffer** (`downloadRouteRegion()`): Given a GPX track, compute a 2km buffer corridor, download tiles for buffered bbox
+3. **Background download**: Android foreground service (`DownloadForegroundService`) keeps download alive when screen is off
 
-Tile index math (standard slippy map):
+**Tile index math** (standard slippy map, implemented in `lib/utils/tile_calculator.dart`):
 - `x = floor((lon + 180) / 360 * 2^zoom)`
 - `y = floor((1 - ln(tan(lat_rad) + sec(lat_rad)) / pi) / 2 * 2^zoom)`
 
-This is implemented in `lib/utils/tile_calculator.dart`.
+**Concurrency control** (fixed in commit `35d5539`):
+- MapLibre's `downloadOfflineRegion()` had a deadlock bug when downloading WMS tiles
+- Bug: broken semaphore implementation caused download to hang indefinitely
+- Fix: replaced semaphore logic with queue-based concurrency control
+- Now downloads complete reliably, even for large regions
+
+**Future (Phase 4 WMS caching)**:
+- WMS tiles (orthophotos) will also use MapLibre's offline region API
+- Alternative: custom MBTiles for WMS responses, then add as RasterSource
+- Decision pending based on WMS endpoint testing (see `docs/TODO.md`)
 
 ### GPS and Location
 
@@ -127,15 +142,17 @@ GPX is the interchange format. Internally, routes are stored in SQLite for fast 
 
 ## Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `maplibre_gl` | Map rendering, vector tiles (2D) |
-| `geolocator` | GPS position stream |
-| `gpx` | GPX file parsing and generation |
-| `path_provider` | Access to app storage directories |
-| `sqflite` | Local SQLite database for routes and metadata |
-| `permission_handler` | Runtime permission requests |
-| `http` | WMS requests |
+| Package | Purpose | Phase |
+|---------|---------|-------|
+| `maplibre_gl` | Map rendering, vector tiles, offline regions | 1, 3 |
+| `geolocator` | GPS position stream | 1, 2 |
+| `gpx` | GPX file parsing and generation | 2 |
+| `path_provider` | Access to app storage directories | 2, 3 |
+| `file_picker` | GPX file import UI | 2 |
+| `permission_handler` | Runtime permission requests | 1, 2, 3 |
+| `connectivity_plus` | Network status detection (online/offline) | 3 |
+| `flutter_foreground_task` | Android foreground service for background downloads | 3 |
+| `http` | WMS requests (Phase 4, not yet used) | 4 |
 
 ## Threading / Async
 

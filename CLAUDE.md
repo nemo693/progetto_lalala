@@ -144,6 +144,13 @@ This is configured in `MapLibreProvider.defaultStyleUrl` in `lib/services/map_se
 - MBTiles spec: https://github.com/mapbox/mbtiles-spec
 - Mapbox Maps SDK (Phase 5 only): https://pub.dev/packages/mapbox_maps_flutter
 
+## Project Documentation
+
+- `docs/ROADMAP.md`: Detailed feature roadmap with phase breakdown
+- `docs/ARCHITECTURE.md`: Technical architecture and design decisions
+- `docs/DATA_SOURCES.md`: Italian geoportal WMS endpoints
+- `docs/TODO.md`: Current TODOs, open points, and testing checklist
+
 ## Secrets
 
 No API keys are needed for Phases 1–4 (MapLibre + OpenFreeMap are fully open).
@@ -229,13 +236,9 @@ The Flutter SDK is installed at `C:\Users\Emilio Dorigatti\flutter` — the spac
 - Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart` (updated for new API)
 
 ### What needs to happen next
-1. **Device testing**: Test Phase 3 offline download flow on Redmi 14:
-   - Download visible area → verify progress → verify tiles render in airplane mode
-   - Download around route → verify buffered area is cached
-   - Lock screen during download → verify foreground service keeps it alive
-   - Manage regions screen → verify list and delete work
-   - Offline indicator → verify it appears when network lost
-2. **Proceed to Phase 4**: WMS data (Italian orthophotos)
+1. **Device testing**: Test Phase 3 offline download flow on Redmi 14. See detailed checklist in `docs/TODO.md` under "Immediate Priorities (Phase 3 Device Testing)".
+2. **Update docs**: Once testing complete, mark Phase 3 as fully done in ROADMAP.md
+3. **Proceed to Phase 4**: WMS data (Italian orthophotos). Research phase — see `docs/TODO.md` "Phase 4 Planning" section for open questions and research needed.
 
 ## Conventions
 
