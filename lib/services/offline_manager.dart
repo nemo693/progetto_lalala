@@ -432,30 +432,34 @@ class OfflineManager {
 
     int completed = 0;
     int errors = 0;
+    int cached = 0;
+
     // Limit concurrent requests to avoid overwhelming the WMS server
     const maxConcurrent = 4;
-    final semaphore = StreamController<void>();
-    for (int i = 0; i < maxConcurrent; i++) {
-      semaphore.add(null);
-    }
 
-    final futures = <Future>[];
+    // Use a list-based queue instead of StreamController to avoid deadlock
+    final queue = <Future<void>>[];
 
     for (final tile in tiles) {
       if (controller.isClosed) break;
 
-      // Wait for a semaphore slot
-      await semaphore.stream.first;
+      // Wait until we have room in the queue
+      while (queue.length >= maxConcurrent) {
+        if (controller.isClosed) break;
+        await queue.removeAt(0);
+      }
 
       if (controller.isClosed) break;
 
       final future = () async {
         try {
           // Skip if already cached
-          final cached = await WmsTileServer.isTileCached(
+          final isCached = await WmsTileServer.isTileCached(
             wmsSource.id, tile.z, tile.x, tile.y,
           );
-          if (!cached) {
+          if (isCached) {
+            cached++;
+          } else {
             final bytes = await WmsTileServer.fetchWmsTile(
               wmsSource, tile.z, tile.x, tile.y,
             );
@@ -474,29 +478,29 @@ class OfflineManager {
 
         completed++;
         if (!controller.isClosed) {
-          controller.add(DownloadProgress(
-            progressPercent: completed / tiles.length,
-            isComplete: completed >= tiles.length,
-            error: (completed >= tiles.length && errors > 0)
-                ? '$errors tiles failed to download'
-                : null,
-          ));
+          // Emit progress every 10 tiles or on completion
+          if (completed % 10 == 0 || completed >= tiles.length) {
+            controller.add(DownloadProgress(
+              progressPercent: completed / tiles.length,
+              isComplete: completed >= tiles.length,
+              error: (completed >= tiles.length && errors > 0)
+                  ? '$errors tiles failed ($cached already cached)'
+                  : null,
+            ));
+          }
           if (completed >= tiles.length) {
+            debugPrint('[OfflineManager] WMS download complete: $regionName '
+                '(${tiles.length} tiles, $cached cached, $errors errors)');
             controller.close();
           }
         }
-
-        // Release semaphore slot
-        if (!semaphore.isClosed) {
-          semaphore.add(null);
-        }
       }();
 
-      futures.add(future);
+      queue.add(future);
     }
 
-    await Future.wait(futures);
-    await semaphore.close();
+    // Wait for all remaining downloads to complete
+    await Future.wait(queue);
 
     if (!controller.isClosed) {
       controller.add(const DownloadProgress(
