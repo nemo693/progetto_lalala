@@ -39,19 +39,19 @@
 
 **Goal**: Full map functionality without network.
 
-- [ ] Manual region download: draw rectangle, select zoom range, download tiles
-- [x] Progress indicator during download (tile count, MB, estimated remaining) — **backend ready**
-- [x] Route-based download: select a saved route, specify buffer distance, download — **backend ready**
-- [x] Tile storage in MBTiles format — **implemented**
-- [ ] Storage management screen: list cached regions, show size, delete — **backend ready, UI pending**
-- [ ] Offline indicator in UI (icon when no network)
-- [x] Graceful degradation: cached tiles shown, missing tiles handled cleanly — **backend ready**
-- [ ] Background download support (continue when app is backgrounded)
-- [ ] Integration with MapLibre to serve cached tiles as custom tile source
+- [x] Manual region download: draw rectangle, select zoom range, download tiles
+- [x] Progress indicator during download (tile count, MB, estimated remaining)
+- [x] Route-based download: select a saved route, specify buffer distance, download
+- [x] Tile storage using MapLibre's native offline region API
+- [x] Storage management screen: list cached regions, show size, delete
+- [x] Offline indicator in UI (orange "Offline" badge when no network)
+- [x] Graceful degradation: cached tiles shown automatically, MapLibre handles missing tiles
+- [x] Background download support (Android foreground service keeps downloads alive)
+- [x] Integration with MapLibre: tiles served automatically from native cache
 
-**Status**: 🟡 Backend complete (`tile_calculator.dart`, `offline_manager.dart`). UI implementation pending.
+**Status**: ✅ Complete. Awaiting device testing (Redmi 14) to verify download flow and offline functionality.
 
-**Done when**: You can download a region at home, enable airplane mode, and navigate in the field using cached tiles.
+**Done when**: You can download a region at home, enable airplane mode, and navigate in the field using cached tiles. ✅ Implementation complete, device testing pending.
 
 ## Phase 4 — WMS Orthophotos
 

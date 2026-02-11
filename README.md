@@ -6,13 +6,19 @@ Built with Flutter and MapLibre GL. Android only (for now).
 
 <!-- TODO: screenshots -->
 
-## Features (planned)
+## Features
 
-- Offline map downloads (MBTiles)
-- GPX import/export and track recording
-- Italian regional orthophotos via WMS
+**Implemented:**
+- ✅ GPS location with accuracy indicator
+- ✅ GPX import and track recording with live stats
+- ✅ Offline map downloads (MapLibre native cache)
+- ✅ Background downloads via Android foreground service
+- ✅ Offline region management
+
+**Planned:**
+- Italian regional orthophotos via WMS (Phase 4)
 - 3D terrain visualization (Mapbox, Phase 5)
-- Minimal, gloves-friendly UI
+- Minimal, gloves-friendly UI throughout
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full feature plan.
 
