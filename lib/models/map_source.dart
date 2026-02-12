@@ -143,20 +143,86 @@ class MapSource {
     avgTileSizeBytes: 60000,
   );
 
+  static const trentinoOrthophoto = MapSource(
+    id: 'trentino_ortho',
+    name: 'Trentino Orthophoto 2015',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://siat.provincia.tn.it/geoserver/stem/ecw-rgb-2015/wms',
+    wmsLayers: 'ecw-rgb-2015',
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© Provincia Autonoma di Trento',
+    tileSize: 256,
+    avgTileSizeBytes: 80000, // Higher resolution (0.2m) = larger tiles
+  );
+
+  static const trentinoLidarShading = MapSource(
+    id: 'trentino_lidar',
+    name: 'Trentino LiDAR Hillshade',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://siat.provincia.tn.it/geoserver/stem/dtm_315_wg/wms',
+    wmsLayers: 'dtm_315_wg', // DTM hillshade with 315° azimuth (northwest lighting)
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© Provincia Autonoma di Trento - LiDAR DTM',
+    tileSize: 256,
+    avgTileSizeBytes: 30000, // Grayscale hillshade = smaller than color orthophoto
+  );
+
+  static const ageaOrthophoto2023 = MapSource(
+    id: 'agea_2023',
+    name: 'Italy AGEA 2023',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://servizigis.regione.emilia-romagna.it/wms/agea2023_rgb',
+    wmsLayers: 'agea2023_rgb',
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© AGEA 2023 - Agenzia per le Erogazioni in Agricoltura',
+    tileSize: 256,
+    avgTileSizeBytes: 70000, // 0.2m resolution, recent high-quality RGB
+  );
+
   /// All available map sources, in display order.
   static const List<MapSource> all = [
     openFreeMap,
     openTopoMap,
     esriWorldImagery,
     pcnOrthophoto,
+    trentinoOrthophoto,
+    trentinoLidarShading,
+    ageaOrthophoto2023,
   ];
 
   /// Look up a source by id. Returns [openFreeMap] if not found.
-  static MapSource byId(String id) {
+  static MapSource byId(String id, {List<MapSource> customSources = const []}) {
+    // Check custom sources first
+    for (final s in customSources) {
+      if (s.id == id) return s;
+    }
+    // Then check built-in sources
     for (final s in all) {
       if (s.id == id) return s;
     }
     return openFreeMap;
+  }
+
+  /// Get all available sources (built-in + custom), grouped by type.
+  ///
+  /// Returns sources in display order: base maps first, then WMS sources
+  /// (built-in WMS followed by custom WMS).
+  static List<MapSource> allWithCustom(List<MapSource> customSources) {
+    // Base maps (vector + raster XYZ)
+    final baseMaps = all.where((s) => s.type != MapSourceType.wms).toList();
+    // Built-in WMS
+    final builtinWms = all.where((s) => s.type == MapSourceType.wms).toList();
+    // Custom WMS (already filtered by CustomWmsService)
+    return [...baseMaps, ...builtinWms, ...customSources];
   }
 
   // ── Style string for MapLibre ───────────────────────────────────

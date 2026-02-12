@@ -48,10 +48,12 @@ The developer is **new to**:
 - Storage management
 - Offline indicator and graceful degradation
 
-### Phase 4 - WMS Data
-- Italian regional orthophotos via WMS
-- Cache WMS responses as tiles for offline use
-- Layer switching (base map / orthophoto / hybrid)
+### Phase 4 - WMS Data (core complete, testing pending)
+- Italian regional orthophotos via WMS (PCN, Trentino, AGEA)
+- Local WMS tile proxy server for MapLibre integration
+- Layer switching (vector / raster / WMS sources)
+- Custom WMS source management
+- Remaining: opacity control, offline WMS download, device testing
 
 ### Phase 5 - 3D Terrain (Mapbox)
 - Add Mapbox SDK alongside MapLibre for 3D terrain only
@@ -59,6 +61,11 @@ The developer is **new to**:
 - Custom DTM integration (Italian high-res)
 - Drape orthophotos over 3D terrain
 - Terrain exaggeration control
+
+### Future Ideas
+- Viewshed analysis, custom data collection forms, data logging (CSV/GeoJSON)
+- Points of interest (POI), custom map layers/collections
+- See `docs/ROADMAP.md` for full list
 
 ### Not in scope
 - Turn-by-turn navigation, social features, weather, iOS (for now)
@@ -102,19 +109,25 @@ lib/
     map_screen.dart                      # Main map view (primary screen)
     routes_screen.dart                   # Route list management
     offline_regions_screen.dart          # Offline region management
+    wms_sources_screen.dart              # WMS source management (built-in + custom)
+    custom_wms_screen.dart               # Custom WMS source add/edit
   services/
     map_service.dart                     # Map provider abstraction
+    map_source_preference.dart           # Persist selected map source + hidden WMS IDs
     location_service.dart                # GPS location handling
     offline_manager.dart                 # Offline tile management (MapLibre native API)
     gpx_service.dart                     # GPX import/export/recording
     route_storage_service.dart           # Route persistence (GPX files + JSON metadata)
     connectivity_service.dart            # Network status detection
     download_foreground_service.dart     # Android foreground service for downloads
+    custom_wms_service.dart              # Custom WMS source persistence (JSON file)
+    wms_tile_server.dart                 # Local HTTP proxy for WMS tile requests
   widgets/
     download_progress_overlay.dart       # Download progress UI overlay
   models/
     route.dart                           # Route/track data model
     waypoint.dart                        # Waypoint data model
+    map_source.dart                      # Map source model (vector/rasterXyz/wms)
   utils/
     tile_calculator.dart                 # Tile math (bbox to tile indices, etc.)
 scripts/
@@ -124,6 +137,8 @@ docs/
   ARCHITECTURE.md                        # Technical architecture
   DATA_SOURCES.md                        # Italian geoportal endpoints
   ROADMAP.md                             # Detailed feature roadmap
+  TODO.md                                # Current TODOs, open points, testing checklists
+  CUSTOM_WMS.md                          # Guide to adding custom WMS sources
 ```
 
 ## Tile Source
@@ -148,7 +163,8 @@ This is configured in `MapLibreProvider.defaultStyleUrl` in `lib/services/map_se
 
 - `docs/ROADMAP.md`: Detailed feature roadmap with phase breakdown
 - `docs/ARCHITECTURE.md`: Technical architecture and design decisions
-- `docs/DATA_SOURCES.md`: Italian geoportal WMS endpoints
+- `docs/DATA_SOURCES.md`: Italian geoportal WMS endpoints (+ custom WMS guide)
+- `docs/CUSTOM_WMS.md`: Guide to adding and managing custom WMS sources
 - `docs/TODO.md`: Current TODOs, open points, and testing checklist
 
 ## Secrets
@@ -235,10 +251,20 @@ The Flutter SDK is installed at `C:\Users\Emilio Dorigatti\flutter` — the spac
 - `android/app/src/main/AndroidManifest.xml`: Added `FOREGROUND_SERVICE_DATA_SYNC` permission and foreground task service declaration
 - Tests: `test/tile_calculator_test.dart`, `test/offline_manager_test.dart` (updated for new API)
 
+### What's done (Phase 4 — WMS orthophotos, core complete)
+- `lib/models/map_source.dart`: `MapSource` model with vector/rasterXyz/wms types, WMS GetMap URL builder, built-in sources (OpenFreeMap, OpenTopoMap, Esri Satellite, PCN orthophoto, Trentino orthophoto, Trentino LiDAR, AGEA 2023), `LocalStyleServer` for offline downloads
+- `lib/services/wms_tile_server.dart`: Local HTTP tile proxy for WMS sources (serves tiles to MapLibre via localhost)
+- `lib/services/custom_wms_service.dart`: Custom WMS source CRUD with JSON persistence
+- `lib/services/map_source_preference.dart`: Selected source + hidden WMS IDs persisted via SharedPreferences
+- `lib/screens/wms_sources_screen.dart`: WMS source management UI (built-in visibility toggles, custom source add/edit/delete)
+- `lib/screens/map_screen.dart`: Map source picker integrated, layer switching works across all source types
+
 ### What needs to happen next
-1. **Device testing**: Test Phase 3 offline download flow on Redmi 14. See detailed checklist in `docs/TODO.md` under "Immediate Priorities (Phase 3 Device Testing)".
-2. **Update docs**: Once testing complete, mark Phase 3 as fully done in ROADMAP.md
-3. **Proceed to Phase 4**: WMS data (Italian orthophotos). Research phase — see `docs/TODO.md` "Phase 4 Planning" section for open questions and research needed.
+1. **Device testing**: Test Phase 3 offline download flow on Redmi 14. See checklist in `docs/TODO.md`.
+2. **Device testing**: Test Phase 4 WMS tile loading, layer switching, and custom sources on Redmi 14.
+3. **Phase 4 remaining**: Opacity control for overlay mode, offline WMS tile download.
+4. **Update docs**: Once testing complete, mark phases as fully done in ROADMAP.md.
+5. **Phase 2 export**: GPX export/share (low priority, can be done anytime).
 
 ## Conventions
 

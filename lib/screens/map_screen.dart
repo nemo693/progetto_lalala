@@ -3,7 +3,7 @@ import 'dart:math' show Point;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
-import '../main.dart' show offlineManager;
+import '../main.dart' show offlineManager, customWmsService;
 import '../models/map_source.dart';
 import '../models/route.dart';
 import '../models/waypoint.dart' as model;
@@ -18,6 +18,7 @@ import '../services/route_storage_service.dart';
 import '../services/wms_tile_server.dart';
 import '../utils/tile_calculator.dart';
 import '../widgets/download_progress_overlay.dart';
+import 'wms_sources_screen.dart';
 import 'offline_regions_screen.dart';
 import 'routes_screen.dart';
 
@@ -53,6 +54,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   // Map source
   MapSource _currentMapSource = MapSource.openFreeMap;
+  Set<String> _hiddenWmsIds = {};
 
   // Offline download state
   Stream<DownloadProgress>? _downloadStream;
@@ -81,6 +83,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   LatLng? _rectangleEnd;
   Fill? _rectangleFill;
 
+  /// Get all available map sources (built-in + custom), excluding hidden WMS.
+  List<MapSource> get _availableSources =>
+      MapSource.allWithCustom(customWmsService.customSources)
+          .where((s) => !_hiddenWmsIds.contains(s.id))
+          .toList();
+
   // Track last camera position so rebuilds don't reset the map view
   CameraPosition _lastCameraPosition = const CameraPosition(
     target: LatLng(_defaultLat, _defaultLon),
@@ -92,6 +100,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadMapSourcePreference();
+    _loadHiddenWmsIds();
     _initLocation();
     _initConnectivity();
   }
@@ -114,7 +123,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _loadMapSourcePreference() async {
-    final source = await MapSourcePreference.load();
+    final source = await MapSourcePreference.load(customWmsService);
     if (mounted && source.id != _currentMapSource.id) {
       // For WMS sources, start the tile server to resolve the style
       String? resolvedWmsStyle;
@@ -128,6 +137,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         _currentMapSource = source;
         _wmsResolvedStyle = resolvedWmsStyle;
       });
+    }
+  }
+
+  Future<void> _loadHiddenWmsIds() async {
+    final ids = await MapSourcePreference.loadHiddenWmsIds();
+    if (mounted && ids.isNotEmpty) {
+      setState(() => _hiddenWmsIds = ids);
     }
   }
 
@@ -631,53 +647,44 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            // ── Map source section ──
+            // ── Base maps section ──
             const Padding(
               padding: EdgeInsets.only(left: 16, bottom: 4),
-              child: Text('MAP SOURCE',
+              child: Text('BASE MAPS',
                   style: TextStyle(
                       color: Colors.white38,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1.2)),
             ),
-            ...MapSource.all.map((source) {
-              final isActive = source.id == _currentMapSource.id;
-              IconData icon;
-              if (source.type == MapSourceType.vector) {
-                icon = Icons.map;
-              } else if (source.type == MapSourceType.wms) {
-                icon = Icons.photo_library;
-              } else if (source.id == 'esri_imagery') {
-                icon = Icons.satellite_alt;
-              } else {
-                icon = Icons.terrain;
-              }
-              return ListTile(
-                leading: Icon(
-                  icon,
-                  color: isActive
-                      ? const Color(0xFF4A90D9)
-                      : Colors.white70,
-                ),
-                title: Text(source.name,
-                    style: TextStyle(
-                      color: isActive
-                          ? const Color(0xFF4A90D9)
-                          : Colors.white70,
-                      fontWeight:
-                          isActive ? FontWeight.w600 : FontWeight.normal,
-                    )),
-                trailing: isActive
-                    ? const Icon(Icons.check,
-                        color: Color(0xFF4A90D9), size: 20)
-                    : null,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _switchMapSource(source);
-                },
-              );
-            }),
+            ..._availableSources
+                .where((s) => s.type != MapSourceType.wms)
+                .map((source) => _buildSourceTile(ctx, source)),
+
+            const Divider(color: Colors.white12),
+
+            // ── WMS layers section ──
+            const Padding(
+              padding: EdgeInsets.only(left: 16, bottom: 4),
+              child: Text('WMS LAYERS',
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2)),
+            ),
+            ..._availableSources
+                .where((s) => s.type == MapSourceType.wms)
+                .map((source) => _buildSourceTile(ctx, source)),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white38),
+              title: const Text('Manage WMS sources...',
+                  style: TextStyle(color: Colors.white54)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openWmsSourcesScreen();
+              },
+            ),
 
             const Divider(color: Colors.white12),
 
@@ -981,7 +988,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   const Text('Sources to cache:',
                       style:
                           TextStyle(color: Colors.white54, fontSize: 12)),
-                  ...MapSource.all.map((source) {
+                  ..._availableSources.map((source) {
                     final canDownload = source.supportsOfflineDownload;
                     return CheckboxListTile(
                       dense: true,
@@ -1232,6 +1239,62 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_showRegionBoundaries) {
       _loadRegionBoundaries();
     }
+  }
+
+  Widget _buildSourceTile(BuildContext ctx, MapSource source) {
+    final isActive = source.id == _currentMapSource.id;
+    IconData icon;
+    if (source.type == MapSourceType.vector) {
+      icon = Icons.map;
+    } else if (source.type == MapSourceType.wms) {
+      icon = Icons.photo_library;
+    } else if (source.id == 'esri_imagery') {
+      icon = Icons.satellite_alt;
+    } else {
+      icon = Icons.terrain;
+    }
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: isActive ? const Color(0xFF4A90D9) : Colors.white70,
+      ),
+      title: Text(source.name,
+          style: TextStyle(
+            color: isActive ? const Color(0xFF4A90D9) : Colors.white70,
+            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+          )),
+      trailing: isActive
+          ? const Icon(Icons.check, color: Color(0xFF4A90D9), size: 20)
+          : null,
+      onTap: () {
+        Navigator.pop(ctx);
+        _switchMapSource(source);
+      },
+    );
+  }
+
+  Future<void> _openWmsSourcesScreen() async {
+    final result = await Navigator.push<WmsSourcesResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WmsSourcesScreen(
+          customWmsService: customWmsService,
+          hiddenWmsIds: _hiddenWmsIds,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // Update hidden WMS IDs if changed
+    if (result != null) {
+      _hiddenWmsIds = result.hiddenWmsIds;
+      MapSourcePreference.saveHiddenWmsIds(_hiddenWmsIds);
+      // If the current source was just hidden, fall back to OpenFreeMap
+      if (_hiddenWmsIds.contains(_currentMapSource.id)) {
+        _switchMapSource(MapSource.openFreeMap);
+      }
+    }
+    // Refresh UI in case custom sources were added/removed
+    setState(() {});
   }
 
   @override

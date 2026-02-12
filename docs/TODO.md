@@ -1,6 +1,6 @@
 # TODO and Open Points
 
-**Last updated**: 2026-02-11
+**Last updated**: 2026-02-12
 
 ## Immediate Priorities (Phase 3 Device Testing)
 
@@ -74,40 +74,29 @@ Phase 3 (offline maps) is code-complete but **not yet tested on device**. Must v
 
 **Priority**: Low (import and recording work; export is a "nice to have" for sharing with others)
 
-## Phase 4 Planning (WMS Orthophotos)
+## Phase 4 Progress (WMS Orthophotos)
 
-### Research Needed Before Starting
+### Done
+- [x] WMS client: `MapSource.buildWmsGetMapUrl()` constructs GetMap requests from tile coordinates (WMS 1.1.0)
+- [x] `MapSource` model with vector, rasterXyz, and wms types
+- [x] Built-in WMS sources: PCN national orthophoto, Trentino orthophoto (2015), Trentino LiDAR hillshade, AGEA 2023
+- [x] Built-in raster sources: OpenTopoMap, Esri Satellite
+- [x] Local WMS tile proxy: `WmsTileServer` serves WMS tiles to MapLibre via `http://127.0.0.1`
+- [x] Layer switching: map source picker integrated into map screen (all source types)
+- [x] Custom WMS source management: `CustomWmsService` + `WmsSourcesScreen` (add/edit/delete)
+- [x] Built-in WMS visibility toggles (show/hide per source)
+- [x] Map source preference persistence via `MapSourcePreference` + `SharedPreferences`
+- [x] `LocalStyleServer` for serving raster style JSON to MapLibre's offline downloader
+- [x] Offline download support extended for raster XYZ and WMS sources
 
-1. **WMS Endpoint Selection**
-   - [ ] Survey Italian regional WMS endpoints (see `docs/DATA_SOURCES.md`)
-   - [ ] Test GetCapabilities and GetMap requests for each
-   - [ ] Verify coordinate systems (most use EPSG:3857 or EPSG:4326)
-   - [ ] Check tile size limits and format support (PNG vs JPEG)
-   - [ ] Document authentication requirements (most are open, but some regions require API keys)
+### Remaining
+- [ ] Opacity control for WMS/orthophoto overlay (hybrid mode)
+- [ ] Pre-download WMS tiles for a region/route (offline WMS workflow)
+- [ ] Device testing on Redmi 14
 
-2. **Tile Caching Strategy**
-   - [ ] Decide: cache WMS responses as MapLibre raster source, or write custom MBTiles?
-   - [ ] MapLibre approach: simpler, but less control over cache eviction
-   - [ ] MBTiles approach: full control, compatible with QGIS, but requires custom tile server or MapLibre RasterSource from MBTiles
-   - [ ] Benchmark: how does MapLibre's native raster cache handle large offline WMS tiles?
-
-3. **Layer Switching UI**
-   - [ ] Design: bottom sheet with layer list? Floating button? Map style picker?
-   - [ ] Options: base map only, orthophoto only, hybrid (semi-transparent orthophoto over base map)
-   - [ ] Opacity slider for hybrid mode
-   - [ ] Remember user preference across sessions
-
-4. **Performance Considerations**
-   - [ ] WMS requests are slower than vector tile CDNs (regional servers, larger payloads)
-   - [ ] Raster tiles are larger than vector tiles (expect 50–200 KB per tile vs 10–30 KB)
-   - [ ] Pre-download will take significantly longer
-   - [ ] Consider progressive download: low zoom first, then refine
-
-### Open Questions
-
-- **Do Italian WMS endpoints support WMTS?** WMTS (tiled) is faster than WMS (on-demand rendering). Check if endpoints like PCN or regional geoportals offer WMTS. If yes, use that instead.
-- **How to handle region boundaries?** Orthophoto coverage often stops at administrative borders. Should we auto-switch to base map outside coverage, or show a "no data" indicator?
-- **Color correction?** Orthophotos from different years/regions may have different color balance. Do we need normalization, or accept the inconsistency?
+### Open Questions (Still Relevant)
+- **Region boundaries**: Orthophoto coverage stops at administrative borders. Auto-switch to base map outside coverage, or show "no data" indicator?
+- **Color correction**: Orthophotos from different years/regions have different color balance. Accept inconsistency for now.
 
 ## Phase 5 Planning (3D Terrain)
 
@@ -212,23 +201,34 @@ Once Phase 3 device testing is complete:
 
 ## Future Feature Ideas (Not Planned)
 
-These are not in scope for MVP, but noted for future consideration:
+Full feature list with descriptions in `docs/ROADMAP.md` → "Future Ideas". Below are effort estimates and implementation notes.
 
-### High Value, Low Effort
-- **Dark mode map style**: OpenFreeMap has a dark style (`styles/dark`). Add a toggle. (1 hour)
-- **Compass rose on map**: Show N/S/E/W labels around map edge. Useful for navigation. (2 hours)
-- **Distance measurement tool**: Tap two points, show straight-line distance. (2 hours)
-- **Coordinate format picker**: Currently shows decimal degrees. Add DMS, UTM, MGRS. (3 hours)
+### Quick Wins (~1–3 hours each)
+| Feature | Effort | Notes |
+|---------|--------|-------|
+| Dark mode map style | ~1h | OpenFreeMap `styles/dark` toggle |
+| Compass rose on map | ~2h | N/S/E/W labels around map edge |
+| Distance measurement tool | ~2h | Tap two points, straight-line distance |
+| Coordinate format picker | ~3h | Add DMS, UTM, MGRS to coord chip |
 
-### High Value, High Effort
-- **Offline search**: Geocoding without network (requires local place name database). (20+ hours)
-- **Route planning**: Tap waypoints on map, generate route. (40+ hours)
-- **Integration with Italian refuge booking systems**: Auto-populate waypoints with refuge info. (60+ hours)
+### Medium Effort (5–20 hours)
+| Feature | Effort | Notes |
+|---------|--------|-------|
+| Data logging (CSV, GeoJSON) | 5–10h | Extends existing track recording, configurable fields |
+| Points of interest (POI) | 10–15h | Custom POIs, categories, photos, import/export |
 
-### Low Value (Avoid Feature Creep)
-- **Social features**: Share routes, follow friends. (Adds complexity, moderation burden)
-- **Weather overlay**: Requires API key, data fees, and constant updates. (Use external app instead)
-- **Turn-by-turn navigation**: Out of scope. This is a map viewer, not a navigation app.
+### High Effort (20+ hours)
+| Feature | Effort | Notes |
+|---------|--------|-------|
+| Custom data collection forms | 20+h | Form builder, SQLite, photo attachments, CSV/GeoJSON export |
+| Offline search/geocoding | 20+h | Local place name DB required |
+| Viewshed analysis | 20+h | Requires DTM (Phase 5). Raycasting on elevation grid |
+| Custom map layers/collections | 30+h | Layer management system. Most architecturally significant |
+| Route planning | 40+h | Tap waypoints, generate route |
+| Italian refuge integration | 60+h | Auto-populate waypoints with refuge info |
+
+### Out of Scope
+- Social features, weather overlay, turn-by-turn navigation (see ROADMAP.md)
 
 ## Testing Strategy
 
@@ -258,14 +258,13 @@ These are not in scope for MVP, but noted for future consideration:
 
 ## Next Steps (Priority Order)
 
-1. **Test Phase 3 on device** (see checklist above) — **CRITICAL, BLOCKING PHASE 4**
-2. **Fix any issues found in device testing**
+1. **Test Phase 3 on device** (see checklist above) — **CRITICAL**
+2. **Fix any issues found in Phase 3 device testing**
 3. **Update documentation** to mark Phase 3 complete
-4. **Research WMS endpoints** for Phase 4 (see `docs/DATA_SOURCES.md`)
-5. **Decide on WMS caching strategy** (MapLibre native vs custom MBTiles)
-6. **Implement Phase 4 WMS client and layer switching**
-7. **Field test with orthophotos** (verify performance, usability)
-8. **Phase 2 export feature** (low priority, can be done anytime)
+4. **Test Phase 4 WMS on device** — verify WMS tile loading, layer switching, custom sources on Redmi 14
+5. **Implement Phase 4 remaining**: opacity control, offline WMS download
+6. **Field test with orthophotos** (verify performance, usability)
+7. **Phase 2 export feature** (low priority, can be done anytime)
 
 ---
 
@@ -273,5 +272,5 @@ These are not in scope for MVP, but noted for future consideration:
 - ✅ Phase 1: Complete, field-tested
 - ✅ Phase 2: Complete (except export), field-tested
 - ⚠️ Phase 3: Code complete, **device testing pending**
-- 🔜 Phase 4: Research phase
+- ⚠️ Phase 4: Core WMS implemented, **opacity + offline WMS + device testing pending**
 - 🔮 Phase 5: Deferred until 2026 H2

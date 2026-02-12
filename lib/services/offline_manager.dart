@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/map_source.dart';
 import '../utils/tile_calculator.dart';
@@ -33,6 +36,9 @@ class OfflineRegion {
   final int maxZoom;
   final String styleUrl;
 
+  /// True if this is a WMS region (not tracked by MapLibre native API)
+  final bool isWms;
+
   const OfflineRegion({
     required this.id,
     required this.name,
@@ -40,6 +46,7 @@ class OfflineRegion {
     required this.minZoom,
     required this.maxZoom,
     required this.styleUrl,
+    this.isWms = false,
   });
 
   /// Check if this region was downloaded for a given [MapSource].
@@ -47,13 +54,48 @@ class OfflineRegion {
   /// Vector sources match by direct URL comparison.
   /// Raster sources match by checking if the style URL contains the source id
   /// (local style server URLs have the format `/style/{id}.json`).
+  /// WMS sources match by checking if the styleUrl is `wms://{sourceId}`.
   bool matchesSource(MapSource source) {
     if (source.type == MapSourceType.vector) {
       return styleUrl == source.url;
     }
-    // Raster: local style server URL contains the source id
+    if (source.type == MapSourceType.wms) {
+      // WMS regions have styleUrl = "wms://{sourceId}"
+      return styleUrl == 'wms://${source.id}';
+    }
+    // Raster XYZ: local style server URL contains the source id
     return styleUrl.contains('/style/${source.id}.');
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'bounds': {
+      'minLat': bounds.minLat,
+      'minLon': bounds.minLon,
+      'maxLat': bounds.maxLat,
+      'maxLon': bounds.maxLon,
+    },
+    'minZoom': minZoom,
+    'maxZoom': maxZoom,
+    'styleUrl': styleUrl,
+    'isWms': isWms,
+  };
+
+  factory OfflineRegion.fromJson(Map<String, dynamic> json) => OfflineRegion(
+    id: json['id'] as int,
+    name: json['name'] as String,
+    bounds: BoundingBox(
+      minLat: json['bounds']['minLat'] as double,
+      minLon: json['bounds']['minLon'] as double,
+      maxLat: json['bounds']['maxLat'] as double,
+      maxLon: json['bounds']['maxLon'] as double,
+    ),
+    minZoom: json['minZoom'] as int,
+    maxZoom: json['maxZoom'] as int,
+    styleUrl: json['styleUrl'] as String,
+    isWms: json['isWms'] as bool? ?? false,
+  );
 }
 
 /// Manages offline map regions using MapLibre's native offline API.
@@ -61,15 +103,51 @@ class OfflineRegion {
 /// Uses the built-in [downloadOfflineRegion], [getListOfRegions], and
 /// [deleteOfflineRegion] functions from maplibre_gl. Tiles are stored in
 /// MapLibre's native cache and served automatically when offline.
+///
+/// WMS tiles are tracked separately (MapLibre doesn't know about them)
+/// and stored in a JSON metadata file.
 class OfflineManager {
   bool _initialized = false;
+  File? _wmsMetadataFile;
+  int _nextWmsId = 1000; // WMS region IDs start at 1000 to avoid MapLibre ID conflicts
 
   /// Initialize the offline manager.
   Future<void> initialize() async {
     // Set a generous tile count limit (default is 6000 which is too low
     // for outdoor use at higher zoom levels).
     await ml.setOfflineTileCountLimit(50000);
+
+    // Initialize WMS metadata file
+    final appDir = await getApplicationDocumentsDirectory();
+    _wmsMetadataFile = File('${appDir.path}/wms_regions.json');
+
     _initialized = true;
+  }
+
+  /// Load WMS region metadata from disk.
+  Future<List<OfflineRegion>> _loadWmsRegions() async {
+    if (_wmsMetadataFile == null || !await _wmsMetadataFile!.exists()) {
+      return [];
+    }
+    try {
+      final content = await _wmsMetadataFile!.readAsString();
+      final json = jsonDecode(content) as List;
+      return json.map((item) => OfflineRegion.fromJson(item as Map<String, dynamic>)).toList();
+    } catch (e) {
+      debugPrint('[OfflineManager] Failed to load WMS metadata: $e');
+      return [];
+    }
+  }
+
+  /// Save WMS region metadata to disk.
+  Future<void> _saveWmsRegions(List<OfflineRegion> regions) async {
+    if (_wmsMetadataFile == null) return;
+    try {
+      final json = regions.map((r) => r.toJson()).toList();
+      await _wmsMetadataFile!.writeAsString(jsonEncode(json), flush: true);
+    } catch (e) {
+      debugPrint('[OfflineManager] Failed to save WMS metadata: $e');
+    }
   }
 
   /// Download tiles for a bounding box at the given zoom range.
@@ -199,13 +277,13 @@ class OfflineManager {
     );
   }
 
-  /// List all saved offline regions.
+  /// List all saved offline regions (both MapLibre and WMS).
   Future<List<OfflineRegion>> listRegions() async {
     if (!_initialized) return [];
 
+    // Get MapLibre native regions
     final nativeRegions = await ml.getListOfRegions();
-
-    return nativeRegions.map((r) {
+    final mapLibreList = nativeRegions.map((r) {
       final name = r.metadata['name'] as String? ??
           'Region ${r.id}';
       return OfflineRegion(
@@ -220,29 +298,84 @@ class OfflineManager {
         minZoom: r.definition.minZoom.round(),
         maxZoom: r.definition.maxZoom.round(),
         styleUrl: r.definition.mapStyleUrl,
+        isWms: false,
       );
     }).toList();
+
+    // Get WMS regions
+    final wmsList = await _loadWmsRegions();
+
+    // Combine and return
+    return [...mapLibreList, ...wmsList];
   }
 
   /// Rename an offline region by updating its metadata.
   Future<void> renameRegion(int regionId, String newName) async {
     if (!_initialized) return;
-    await ml.updateOfflineRegionMetadata(regionId, {'name': newName});
+
+    // Check if it's a WMS region
+    if (regionId >= _nextWmsId) {
+      final wmsRegions = await _loadWmsRegions();
+      final index = wmsRegions.indexWhere((r) => r.id == regionId);
+      if (index >= 0) {
+        final updated = OfflineRegion(
+          id: wmsRegions[index].id,
+          name: newName,
+          bounds: wmsRegions[index].bounds,
+          minZoom: wmsRegions[index].minZoom,
+          maxZoom: wmsRegions[index].maxZoom,
+          styleUrl: wmsRegions[index].styleUrl,
+          isWms: true,
+        );
+        wmsRegions[index] = updated;
+        await _saveWmsRegions(wmsRegions);
+      }
+    } else {
+      // MapLibre region
+      await ml.updateOfflineRegionMetadata(regionId, {'name': newName});
+    }
   }
 
-  /// Delete an offline region by its native ID.
+  /// Delete an offline region by its ID.
   Future<void> deleteRegion(int regionId) async {
     if (!_initialized) return;
-    await ml.deleteOfflineRegion(regionId);
+
+    // Check if it's a WMS region
+    if (regionId >= _nextWmsId) {
+      final wmsRegions = await _loadWmsRegions();
+      final region = wmsRegions.firstWhere((r) => r.id == regionId);
+
+      // Delete the cached tiles
+      // Extract source ID from styleUrl (format: "wms://{sourceId}")
+      final sourceId = region.styleUrl.replaceFirst('wms://', '');
+      await WmsTileServer.clearCache(sourceId);
+
+      // Remove from metadata
+      wmsRegions.removeWhere((r) => r.id == regionId);
+      await _saveWmsRegions(wmsRegions);
+    } else {
+      // MapLibre region
+      await ml.deleteOfflineRegion(regionId);
+    }
   }
 
-  /// Delete all offline regions.
+  /// Delete all offline regions (both MapLibre and WMS).
   Future<void> clearAll() async {
     if (!_initialized) return;
+
+    // Clear MapLibre regions
     final regions = await ml.getListOfRegions();
     for (final r in regions) {
       await ml.deleteOfflineRegion(r.id);
     }
+
+    // Clear WMS regions
+    final wmsRegions = await _loadWmsRegions();
+    for (final region in wmsRegions) {
+      final sourceId = region.styleUrl.replaceFirst('wms://', '');
+      await WmsTileServer.clearCache(sourceId);
+    }
+    await _saveWmsRegions([]);
   }
 
   /// Set MapLibre to offline mode (no network requests).
@@ -491,6 +624,16 @@ class OfflineManager {
           if (completed >= tiles.length) {
             debugPrint('[OfflineManager] WMS download complete: $regionName '
                 '(${tiles.length} tiles, $cached cached, $errors errors)');
+
+            // Save metadata for this WMS region
+            await _saveWmsRegionMetadata(
+              regionName: regionName,
+              sourceId: wmsSource.id,
+              bounds: bounds,
+              minZoom: minZoom,
+              maxZoom: maxZoom,
+            );
+
             controller.close();
           }
         }
@@ -507,8 +650,51 @@ class OfflineManager {
         progressPercent: 1.0,
         isComplete: true,
       ));
+
+      // Save metadata for this WMS region
+      await _saveWmsRegionMetadata(
+        regionName: regionName,
+        sourceId: wmsSource.id,
+        bounds: bounds,
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+      );
+
       controller.close();
     }
+  }
+
+  /// Save metadata for a completed WMS download.
+  Future<void> _saveWmsRegionMetadata({
+    required String regionName,
+    required String sourceId,
+    required BoundingBox bounds,
+    required int minZoom,
+    required int maxZoom,
+  }) async {
+    final wmsRegions = await _loadWmsRegions();
+
+    // Check if a region with this name already exists
+    final existingIndex = wmsRegions.indexWhere((r) => r.name == regionName);
+
+    final region = OfflineRegion(
+      id: existingIndex >= 0 ? wmsRegions[existingIndex].id : _nextWmsId++,
+      name: regionName,
+      bounds: bounds,
+      minZoom: minZoom,
+      maxZoom: maxZoom,
+      styleUrl: 'wms://$sourceId', // Store source ID for deletion
+      isWms: true,
+    );
+
+    if (existingIndex >= 0) {
+      wmsRegions[existingIndex] = region;
+    } else {
+      wmsRegions.add(region);
+    }
+
+    await _saveWmsRegions(wmsRegions);
+    debugPrint('[OfflineManager] Saved WMS region metadata: $regionName (id=${region.id})');
   }
 
   /// Clean up.

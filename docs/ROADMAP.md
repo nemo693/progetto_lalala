@@ -31,7 +31,7 @@
 - [x] Delete routes
 - [ ] Export routes (share GPX file)
 
-**Status**: ✅ Core features complete. Device testing in progress (Redmi 14). Export feature pending.
+**Status**: ✅ Core features complete, field-tested on Redmi 14. Export feature pending.
 
 **Done when**: You can load a GPX from a planning tool, see it on the map, record your actual track, and compare them.
 
@@ -57,13 +57,20 @@
 
 **Goal**: Italian orthophotos as an alternative base layer.
 
-- [ ] WMS client: construct GetMap requests from tile coordinates
-- [ ] PCN national orthophoto integration
-- [ ] Cache WMS responses as MBTiles (same format as base map cache)
-- [ ] Layer switcher UI: base map / orthophoto / hybrid overlay
-- [ ] Regional WMS endpoint configuration (Veneto, Trentino, etc.)
+- [x] WMS client: construct GetMap requests from tile coordinates (`MapSource.buildWmsGetMapUrl`)
+- [x] PCN national orthophoto integration (built-in source)
+- [x] Local WMS tile proxy server (`WmsTileServer`) — serves WMS tiles to MapLibre via localhost
+- [x] Layer switcher UI: map source picker with all sources (vector, raster XYZ, WMS)
+- [x] Regional WMS endpoints: Trentino orthophoto, Trentino LiDAR hillshade, AGEA 2023
+- [x] Custom WMS source management: add/edit/delete user-defined WMS endpoints
+- [x] WMS source visibility toggles (show/hide built-in WMS sources)
+- [x] Map source preference persistence across app restarts
+- [x] Multiple base map sources: OpenFreeMap (vector), OpenTopoMap (raster), Esri Satellite (raster)
 - [ ] Opacity control for orthophoto overlay
-- [ ] Pre-download orthophoto tiles for a region/route (same UI as Phase 3)
+- [ ] Pre-download WMS tiles for a region/route (offline WMS)
+- [ ] Device testing on Redmi 14
+
+**Status**: ⚠️ Core WMS implementation complete. Opacity control and offline WMS download pending. Device testing needed.
 
 **Done when**: You can switch to orthophoto view, see real aerial imagery, and it works offline after downloading.
 
@@ -86,6 +93,29 @@
 
 These are explicitly out of scope but noted for reference:
 
+### Field Data & Analysis
+- **Viewshed analysis**: Compute visible area from a point using DTM data. Show what terrain is visible/hidden from your position or any tapped point. Useful for route planning and orientation.
+- **Data collection with custom forms**: Define custom form templates (species sightings, geological observations, trail conditions, etc.) tied to GPS coordinates. Fill in fields on the go, attach photos. Export as CSV/GeoJSON.
+- **Data logging (CSV, GeoJSON, etc.)**: Continuous sensor logging (GPS, altitude, speed, bearing, timestamps) exportable as CSV, GeoJSON, or KML. Configurable logging interval and fields.
+- **Points of interest (POI)**: Create, categorize, and manage custom POIs on the map. Add name, description, icon, photos. Import/export POI collections. Filter POIs by category.
+
+### Custom Map Layers (Collections)
+- **Custom map layers / collections**: Group saved data into named layers that can be toggled on/off as map overlays. Examples:
+  - "All skitouring routes" — show all saved skitouring GPX tracks at once
+  - "Hut waypoints" — all rifugi marked across the Alps
+  - "Geological survey points" — custom form data from fieldwork
+  - "Climbing crags" — POIs for sport climbing areas
+  - Each layer has its own color/style and visibility toggle
+  - Layers can combine GPX tracks, POIs, and form data
+  - Import/export entire layers as a bundle (zip of GPX + CSV + metadata)
+
+### Quick Wins (High Value, Low Effort)
+- **Dark mode map style**: OpenFreeMap has a dark style (`styles/dark`). Add a toggle. (~1 hour)
+- **Compass rose on map**: Show N/S/E/W labels around map edge. (~2 hours)
+- **Distance measurement tool**: Tap two points, show straight-line distance. (~2 hours)
+- **Coordinate format picker**: Currently shows decimal degrees. Add DMS, UTM, MGRS. (~3 hours)
+
+### Other Ideas
 - **Slope analysis**: Compute slope from DTM, shade steep areas (avalanche terrain)
 - **Weather overlay**: Integrate weather radar or forecast data
 - **Multi-day planning**: Link routes into multi-day itineraries

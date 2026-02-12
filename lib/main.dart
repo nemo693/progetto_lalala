@@ -3,15 +3,21 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'screens/map_screen.dart';
 import 'services/offline_manager.dart';
+import 'services/custom_wms_service.dart';
 
 /// Global singleton for offline tile management.
 /// Initialized before runApp() so it's available everywhere.
 final offlineManager = OfflineManager();
 
+/// Global singleton for custom WMS source management.
+/// Initialized before runApp() so it's available everywhere.
+final customWmsService = CustomWmsService();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort();
   await offlineManager.initialize();
+  await customWmsService.initialize();
   runApp(const AlpineNavApp());
 }
 
