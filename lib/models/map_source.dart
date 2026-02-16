@@ -128,21 +128,6 @@ class MapSource {
 
   // ── WMS sources ─────────────────────────────────────────────────
 
-  static const pcnOrthophoto = MapSource(
-    id: 'pcn_ortho',
-    name: 'Italy Orthophoto (PCN)',
-    type: MapSourceType.wms,
-    url: '',
-    wmsBaseUrl:
-        'http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map',
-    wmsLayers: 'OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33',
-    wmsCrs: 'EPSG:3857',
-    wmsFormat: 'image/jpeg',
-    attribution: '© PCN - Ministero dell\'Ambiente',
-    tileSize: 256,
-    avgTileSizeBytes: 60000,
-  );
-
   static const trentinoOrthophoto = MapSource(
     id: 'trentino_ortho',
     name: 'Trentino Orthophoto 2015',
@@ -173,30 +158,13 @@ class MapSource {
     avgTileSizeBytes: 30000, // Grayscale hillshade = smaller than color orthophoto
   );
 
-  static const ageaOrthophoto2023 = MapSource(
-    id: 'agea_2023',
-    name: 'Italy AGEA 2023',
-    type: MapSourceType.wms,
-    url: '',
-    wmsBaseUrl:
-        'https://servizigis.regione.emilia-romagna.it/wms/agea2023_rgb',
-    wmsLayers: 'agea2023_rgb',
-    wmsCrs: 'EPSG:3857',
-    wmsFormat: 'image/jpeg',
-    attribution: '© AGEA 2023 - Agenzia per le Erogazioni in Agricoltura',
-    tileSize: 256,
-    avgTileSizeBytes: 70000, // 0.2m resolution, recent high-quality RGB
-  );
-
   /// All available map sources, in display order.
   static const List<MapSource> all = [
     openFreeMap,
     openTopoMap,
     esriWorldImagery,
-    pcnOrthophoto,
     trentinoOrthophoto,
     trentinoLidarShading,
-    ageaOrthophoto2023,
   ];
 
   /// Look up a source by id. Returns [openFreeMap] if not found.

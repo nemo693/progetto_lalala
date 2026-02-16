@@ -80,34 +80,28 @@ void main() {
   });
 
   group('MapSource WMS', () {
-    test('PCN source has correct type and fields', () {
-      final pcn = MapSource.pcnOrthophoto;
-      expect(pcn.type, MapSourceType.wms);
-      expect(pcn.wmsBaseUrl, isNotNull);
-      expect(pcn.wmsLayers, 'OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33');
-      expect(pcn.wmsCrs, 'EPSG:3857');
-      expect(pcn.wmsFormat, 'image/jpeg');
+    test('Trentino orthophoto source has correct type and fields', () {
+      final src = MapSource.trentinoOrthophoto;
+      expect(src.type, MapSourceType.wms);
+      expect(src.wmsBaseUrl, isNotNull);
+      expect(src.wmsLayers, 'ecw-rgb-2015');
+      expect(src.wmsCrs, 'EPSG:3857');
+      expect(src.wmsFormat, 'image/jpeg');
     });
 
     test('buildWmsGetMapUrl produces valid URL', () {
-      final url = MapSource.pcnOrthophoto.buildWmsGetMapUrl(14, 8655, 5828);
+      final url = MapSource.trentinoOrthophoto.buildWmsGetMapUrl(14, 8655, 5828);
 
       expect(url, contains('SERVICE=WMS'));
       expect(url, contains('VERSION=1.1.0'));
       expect(url, contains('REQUEST=GetMap'));
-      expect(url, contains('LAYERS=OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33'));
+      expect(url, contains('LAYERS=ecw-rgb-2015'));
       expect(url, contains('SRS=EPSG:3857'));
       expect(url, contains('WIDTH=256'));
       expect(url, contains('HEIGHT=256'));
       expect(url, contains('FORMAT=image/jpeg'));
       expect(url, contains('BBOX='));
-      expect(url, contains('wms.pcn.minambiente.it'));
-    });
-
-    test('buildWmsGetMapUrl uses & separator when base has ?', () {
-      final url = MapSource.pcnOrthophoto.buildWmsGetMapUrl(10, 540, 360);
-      // PCN base URL already has ?map=... so separator should be &
-      expect(url, contains('.map&SERVICE=WMS'));
+      expect(url, contains('siat.provincia.tn.it'));
     });
 
     test('all list contains WMS sources', () {
@@ -115,13 +109,13 @@ void main() {
     });
 
     test('byId finds WMS sources', () {
-      final source = MapSource.byId('pcn_ortho');
-      expect(source.id, 'pcn_ortho');
+      final source = MapSource.byId('trentino_ortho');
+      expect(source.id, 'trentino_ortho');
       expect(source.type, MapSourceType.wms);
     });
 
     test('WMS source styleString returns empty style (not for base map)', () {
-      final style = MapSource.pcnOrthophoto.styleString;
+      final style = MapSource.trentinoOrthophoto.styleString;
       expect(style, contains('"sources":{}'));
     });
 
@@ -155,10 +149,10 @@ void main() {
       expect(tiles.length, greaterThan(100));
       expect(tiles.length, lessThan(10000));
 
-      // Size estimate with PCN avg tile size
+      // Size estimate with Trentino orthophoto avg tile size
       final sizeBytes = estimateDownloadSize(
         tiles,
-        avgTileSizeBytes: MapSource.pcnOrthophoto.avgTileSizeBytes,
+        avgTileSizeBytes: MapSource.trentinoOrthophoto.avgTileSizeBytes,
       );
       // Roughly 6-600 MB
       expect(sizeBytes, greaterThan(1024 * 1024));

@@ -257,6 +257,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_activeRoute != null) {
       _displayRoute(_activeRoute!, _activeWaypoints);
     }
+    // Re-display recording track if actively recording
+    if (_recorder.state != RecordingState.idle && _recorder.points.length >= 2) {
+      _mapProvider.addTrackLayer(
+        'recording',
+        _recorder.points.map((p) => [p.latitude, p.longitude]).toList(),
+      );
+    }
     // Re-display region boundaries if they were showing
     if (_showRegionBoundaries) {
       _loadRegionBoundaries();
@@ -1088,6 +1095,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     required int maxZoom,
     required Set<String> sourceIds,
   }) async {
+    // Check connectivity before starting
+    if (!ConnectivityService().isOnline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot download while offline'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
     // Start foreground service so download survives screen-off / app switch
     await DownloadForegroundService.start();
 
@@ -1104,50 +1125,69 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     int completedPhases = 0;
 
     Future<void> runDownloads() async {
-      // Phase 1: Base map tiles via MapLibre native API
-      if (baseSources.isNotEmpty) {
-        final baseStream = offlineManager.downloadRegionMultiSource(
-          regionName: name,
-          bounds: bounds,
-          minZoom: minZoom,
-          maxZoom: maxZoom,
-          sources: baseSources,
-        );
-        await for (final p in baseStream) {
-          if (controller.isClosed) return;
-          final scaled = (completedPhases + p.progressPercent) / totalPhases;
-          if (p.isComplete && p.error == null) {
-            completedPhases++;
+      try {
+        // Phase 1: Base map tiles via MapLibre native API
+        if (baseSources.isNotEmpty) {
+          final baseStream = offlineManager.downloadRegionMultiSource(
+            regionName: name,
+            bounds: bounds,
+            minZoom: minZoom,
+            maxZoom: maxZoom,
+            sources: baseSources,
+          );
+          await for (final p in baseStream) {
+            if (controller.isClosed) return;
+            final scaled = (completedPhases + p.progressPercent) / totalPhases;
+            if (p.isComplete && p.error == null) {
+              completedPhases++;
+            }
+            controller.add(DownloadProgress(
+              progressPercent: scaled,
+              isComplete: false,
+              error: p.error,
+              sourceName: p.sourceName,
+              tilesCompleted: p.tilesCompleted,
+              tilesTotal: p.tilesTotal,
+            ));
           }
-          controller.add(DownloadProgress(
-            progressPercent: scaled,
-            isComplete: false,
-            error: p.error,
-          ));
         }
-      }
 
-      // Phase 2+: WMS tiles via our own downloader
-      for (final wms in wmsSources) {
-        if (controller.isClosed) return;
-        final wmsStream = offlineManager.downloadWmsRegion(
-          wmsSource: wms,
-          regionName: '$name (${wms.name})',
-          bounds: bounds,
-          minZoom: minZoom,
-          maxZoom: maxZoom,
-        );
-        await for (final p in wmsStream) {
+        // Phase 2+: WMS tiles via our own downloader
+        for (final wms in wmsSources) {
           if (controller.isClosed) return;
-          final scaled = (completedPhases + p.progressPercent) / totalPhases;
-          if (p.isComplete && p.error == null) {
-            completedPhases++;
+          final wmsStream = offlineManager.downloadWmsRegion(
+            wmsSource: wms,
+            regionName: '$name (${wms.name})',
+            bounds: bounds,
+            minZoom: minZoom,
+            maxZoom: maxZoom,
+          );
+          await for (final p in wmsStream) {
+            if (controller.isClosed) return;
+            final scaled = (completedPhases + p.progressPercent) / totalPhases;
+            if (p.isComplete && p.error == null) {
+              completedPhases++;
+            }
+            controller.add(DownloadProgress(
+              progressPercent: scaled,
+              isComplete: false,
+              error: p.error,
+              sourceName: p.sourceName,
+              tilesCompleted: p.tilesCompleted,
+              tilesTotal: p.tilesTotal,
+            ));
           }
+        }
+      } catch (e) {
+        // Catch any unexpected errors (network, permission, etc.)
+        if (!controller.isClosed) {
           controller.add(DownloadProgress(
-            progressPercent: scaled,
-            isComplete: false,
-            error: p.error,
+            progressPercent: 0,
+            isComplete: true,
+            error: 'Download failed: $e',
           ));
+          controller.close();
+          return;
         }
       }
 

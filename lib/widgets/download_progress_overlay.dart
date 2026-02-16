@@ -29,6 +29,7 @@ class _DownloadProgressOverlayState extends State<DownloadProgressOverlay> {
   DownloadProgress? _progress;
   StreamSubscription<DownloadProgress>? _sub;
   bool _completed = false;
+  final List<String> _errors = [];
 
   @override
   void initState() {
@@ -36,25 +37,35 @@ class _DownloadProgressOverlayState extends State<DownloadProgressOverlay> {
     _sub = widget.progressStream.listen(
       (progress) {
         if (!mounted) return;
+
+        // Collect errors from individual sources/phases
+        if (progress.error != null && !_errors.contains(progress.error)) {
+          _errors.add(progress.error!);
+        }
+
         setState(() => _progress = progress);
 
         if (progress.isComplete && !_completed) {
           _completed = true;
-          // Show final state briefly, then dismiss
-          Future.delayed(const Duration(seconds: 2), () {
+          // Keep errors visible longer (6s) so user can read them
+          final delay = _errors.isNotEmpty
+              ? const Duration(seconds: 6)
+              : const Duration(seconds: 2);
+          Future.delayed(delay, () {
             if (mounted) widget.onComplete();
           });
         }
       },
       onError: (e) {
         if (!mounted) return;
+        _errors.add('Download failed: $e');
         setState(() => _progress = DownloadProgress(
               progressPercent: 0,
               isComplete: true,
               error: 'Download failed: $e',
             ));
         _completed = true;
-        Future.delayed(const Duration(seconds: 3), () {
+        Future.delayed(const Duration(seconds: 6), () {
           if (mounted) widget.onComplete();
         });
       },
@@ -120,19 +131,36 @@ class _DownloadProgressOverlayState extends State<DownloadProgressOverlay> {
                   fontFamily: 'monospace',
                 ),
               ),
-              if (progress?.error != null)
-                Flexible(
-                  child: Text(
-                    progress!.error!,
-                    style: TextStyle(
-                      color: Colors.red.shade300,
-                      fontSize: 11,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+              if (progress?.tilesCompleted != null && progress?.tilesTotal != null)
+                Text(
+                  '${progress!.tilesCompleted}/${progress.tilesTotal} tiles',
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
                   ),
                 ),
             ],
           ),
+          if (_errors.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _errors.map((err) => Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    err,
+                    style: TextStyle(
+                      color: Colors.red.shade300,
+                      fontSize: 11,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )).toList(),
+              ),
+            ),
         ],
       ),
     );
@@ -140,14 +168,25 @@ class _DownloadProgressOverlayState extends State<DownloadProgressOverlay> {
 
   String _statusText(DownloadProgress? progress) {
     if (progress == null) return 'Starting download...';
-    if (progress.error != null) return 'Download failed';
+    if (progress.isComplete && _errors.isNotEmpty) {
+      return 'Download finished with errors';
+    }
     if (progress.isComplete) return 'Download complete';
-    return 'Downloading tiles...';
+    final source = progress.sourceName;
+    if (_errors.isNotEmpty) {
+      return source != null
+          ? 'Downloading $source (some sources failed)...'
+          : 'Downloading (some sources failed)...';
+    }
+    return source != null ? 'Downloading $source...' : 'Downloading tiles...';
   }
 
   Color _progressColor(DownloadProgress? progress) {
-    if (progress?.error != null) return Colors.red.shade400;
+    if (progress?.isComplete == true && _errors.isNotEmpty) {
+      return Colors.orange.shade400;
+    }
     if (progress?.isComplete == true) return Colors.green.shade400;
+    if (_errors.isNotEmpty) return Colors.orange.shade400;
     return const Color(0xFF4A90D9);
   }
 }

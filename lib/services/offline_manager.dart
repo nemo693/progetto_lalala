@@ -16,11 +16,34 @@ class DownloadProgress {
   final bool isComplete;
   final String? error;
 
+  /// Name of the source currently being downloaded (e.g. "Satellite", "Trentino Orthophoto").
+  final String? sourceName;
+
+  /// Number of tiles completed in the current phase (WMS only — MapLibre native
+  /// reports percentage only).
+  final int? tilesCompleted;
+
+  /// Total tiles in the current phase (WMS only).
+  final int? tilesTotal;
+
   const DownloadProgress({
     required this.progressPercent,
     this.isComplete = false,
     this.error,
+    this.sourceName,
+    this.tilesCompleted,
+    this.tilesTotal,
   });
+
+  /// Create a copy with an updated [sourceName].
+  DownloadProgress withSourceName(String name) => DownloadProgress(
+    progressPercent: progressPercent,
+    isComplete: isComplete,
+    error: error,
+    sourceName: name,
+    tilesCompleted: tilesCompleted,
+    tilesTotal: tilesTotal,
+  );
 
   @override
   String toString() =>
@@ -197,13 +220,39 @@ class OfflineManager {
     debugPrint('[OfflineManager] Starting download: $regionName, '
         'style=${definition.mapStyleUrl}, '
         'zoom=${definition.minZoom}-${definition.maxZoom}');
+
+    // Track progress stalling — if no progress for 60s, abort
+    Timer? stallTimer;
+    double lastProgress = -1;
+
+    void resetStallTimer() {
+      stallTimer?.cancel();
+      stallTimer = Timer(const Duration(seconds: 60), () {
+        if (!controller.isClosed) {
+          debugPrint('[OfflineManager] Download stalled: $regionName (no progress for 60s)');
+          controller.add(DownloadProgress(
+            progressPercent: lastProgress >= 0 ? lastProgress : 0,
+            isComplete: true,
+            error: 'Download stalled — the tile server may be unreachable or rate-limiting requests',
+          ));
+          controller.close();
+        }
+      });
+    }
+
+    resetStallTimer();
+
     try {
       await ml.downloadOfflineRegion(
         definition,
         metadata: {'name': regionName},
         onEvent: (event) {
-          if (controller.isClosed) return;
+          if (controller.isClosed) {
+            stallTimer?.cancel();
+            return;
+          }
           if (event is ml.Success) {
+            stallTimer?.cancel();
             debugPrint('[OfflineManager] Download complete: $regionName');
             controller.add(const DownloadProgress(
               progressPercent: 1.0,
@@ -211,6 +260,7 @@ class OfflineManager {
             ));
             controller.close();
           } else if (event is ml.Error) {
+            stallTimer?.cancel();
             final errorMsg = event.cause.message ?? 'Unknown error';
             debugPrint('[OfflineManager] Download error: $regionName — $errorMsg');
             controller.add(DownloadProgress(
@@ -221,8 +271,10 @@ class OfflineManager {
             controller.close();
           } else if (event is ml.InProgress) {
             final progress = event.progress;
+            lastProgress = progress / 100.0;
+            resetStallTimer();
             controller.add(DownloadProgress(
-              progressPercent: progress / 100.0,
+              progressPercent: lastProgress,
             ));
           } else {
             debugPrint('[OfflineManager] Unknown event: ${event.runtimeType}');
@@ -230,6 +282,7 @@ class OfflineManager {
         },
       );
     } catch (e, stack) {
+      stallTimer?.cancel();
       debugPrint('[OfflineManager] Download exception: $regionName — $e\n$stack');
       if (!controller.isClosed) {
         controller.add(DownloadProgress(
@@ -477,23 +530,27 @@ class OfflineManager {
           // Source failed — report error but continue with next source
           controller.add(DownloadProgress(
             progressPercent: overallProgress,
+            sourceName: source.name,
             error: '${source.name}: ${progress.error}',
           ));
         } else if (progress.isComplete && i == total - 1) {
           // Last source completed
-          controller.add(const DownloadProgress(
+          controller.add(DownloadProgress(
             progressPercent: 1.0,
             isComplete: true,
+            sourceName: source.name,
           ));
           controller.close();
         } else if (progress.isComplete) {
           // Non-last source completed, emit progress but don't close
           controller.add(DownloadProgress(
             progressPercent: (i + 1) / total,
+            sourceName: source.name,
           ));
         } else {
           controller.add(DownloadProgress(
             progressPercent: overallProgress,
+            sourceName: source.name,
           ));
         }
       }
@@ -613,26 +670,45 @@ class OfflineManager {
         if (!controller.isClosed) {
           // Emit progress every 10 tiles or on completion
           if (completed % 10 == 0 || completed >= tiles.length) {
+            final isLast = completed >= tiles.length;
+            final downloaded = completed - cached - errors;
+
+            // Determine error message
+            String? errorMsg;
+            if (isLast && errors > 0) {
+              if (errors == tiles.length - cached) {
+                // All non-cached tiles failed — total failure
+                errorMsg = 'All tiles failed to download. '
+                    'Check your internet connection or the WMS server may be unavailable.';
+              } else {
+                errorMsg = '$errors of ${tiles.length} tiles failed '
+                    '($downloaded downloaded, $cached already cached)';
+              }
+            }
+
             controller.add(DownloadProgress(
               progressPercent: completed / tiles.length,
-              isComplete: completed >= tiles.length,
-              error: (completed >= tiles.length && errors > 0)
-                  ? '$errors tiles failed ($cached already cached)'
-                  : null,
+              isComplete: isLast,
+              error: errorMsg,
+              sourceName: wmsSource.name,
+              tilesCompleted: completed,
+              tilesTotal: tiles.length,
             ));
           }
           if (completed >= tiles.length) {
             debugPrint('[OfflineManager] WMS download complete: $regionName '
                 '(${tiles.length} tiles, $cached cached, $errors errors)');
 
-            // Save metadata for this WMS region
-            await _saveWmsRegionMetadata(
-              regionName: regionName,
-              sourceId: wmsSource.id,
-              bounds: bounds,
-              minZoom: minZoom,
-              maxZoom: maxZoom,
-            );
+            // Only save metadata if at least some tiles succeeded
+            if (errors < tiles.length - cached) {
+              await _saveWmsRegionMetadata(
+                regionName: regionName,
+                sourceId: wmsSource.id,
+                bounds: bounds,
+                minZoom: minZoom,
+                maxZoom: maxZoom,
+              );
+            }
 
             controller.close();
           }

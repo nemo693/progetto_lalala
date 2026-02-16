@@ -4,8 +4,8 @@ import 'package:alpinenav/models/map_source.dart';
 
 void main() {
   group('MapSource', () {
-    test('all contains exactly 7 sources', () {
-      expect(MapSource.all.length, 7);
+    test('all contains exactly 5 sources', () {
+      expect(MapSource.all.length, 5);
     });
 
     test('byId returns correct source', () {

@@ -119,16 +119,8 @@ class WmsTileServer {
       return;
     }
 
-    final source = _sources[sourceId];
-    if (source == null) {
-      request.response
-        ..statusCode = HttpStatus.notFound
-        ..write('Unknown source: $sourceId')
-        ..close();
-      return;
-    }
-
-    // Try cache first
+    // Always try cache first — even if the source isn't registered
+    // (e.g. offline mode with previously downloaded tiles)
     final cached = await _getCachedTile(sourceId, z, x, y);
     if (cached != null) {
       request.response
@@ -139,7 +131,17 @@ class WmsTileServer {
       return;
     }
 
-    // Cache miss — fetch from WMS
+    // Cache miss — try to fetch from WMS if the source is registered
+    final source = _sources[sourceId];
+    if (source == null) {
+      // Source not registered and not in cache — nothing we can do
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('Tile not cached and source not registered: $sourceId')
+        ..close();
+      return;
+    }
+
     final bytes = await _fetchWmsTile(source, z, x, y);
     if (bytes != null) {
       // Cache the tile (fire and forget)
@@ -258,7 +260,7 @@ class WmsTileServer {
     }
   }
 
-  /// Check if a tile is in the cache.
+  /// Check if a tile is in the cache **and** contains valid image data.
   /// Public so the offline downloader can skip already-cached tiles.
   static Future<bool> isTileCached(
       String sourceId, int z, int x, int y) async {
@@ -267,7 +269,20 @@ class WmsTileServer {
       _cacheDir = Directory('${appDir.path}/wms_cache');
     }
     final file = _cacheFile(sourceId, z, x, y);
-    return file.exists();
+    if (!await file.exists()) return false;
+    // Validate the cached bytes are a real image (not empty or XML error)
+    try {
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty || !_isValidImage(bytes)) {
+        // Remove corrupted entry so it gets re-downloaded
+        debugPrint('[WmsTileServer] Removing invalid cached tile $z/$x/$y');
+        try { await file.delete(); } catch (_) {}
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /// Write a tile to the cache. Public for the offline downloader.
