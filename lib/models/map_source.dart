@@ -56,6 +56,13 @@ class MapSource {
   /// Image format for WMS responses (default: image/jpeg).
   final String wmsFormat;
 
+  /// Whether this source requires on-device computation before display.
+  /// Terrain analysis sources need to download DTM and compute slope/aspect.
+  final bool needsComputation;
+
+  /// For terrain sources: which layer to compute ('slope' or 'aspect').
+  final String? terrainLayer;
+
   const MapSource({
     required this.id,
     required this.name,
@@ -68,6 +75,8 @@ class MapSource {
     this.wmsLayers,
     this.wmsCrs = 'EPSG:3857',
     this.wmsFormat = 'image/jpeg',
+    this.needsComputation = false,
+    this.terrainLayer,
   });
 
   /// Build a WMS GetMap URL for the given tile coordinate.
@@ -158,11 +167,39 @@ class MapSource {
     avgTileSizeBytes: 30000, // Grayscale hillshade = smaller than color orthophoto
   );
 
+  // ── Terrain analysis sources ─────────────────────────────────────
+
+  static const slopeAnalysis = MapSource(
+    id: 'terrain_slope',
+    name: 'Slope Analysis',
+    type: MapSourceType.rasterXyz,
+    url: '', // Set dynamically from cache dir at runtime
+    attribution: 'Elevation: AWS Terrain Tiles (Mapzen/USGS)',
+    tileSize: 256,
+    avgTileSizeBytes: 15000, // compressed colorized PNG
+    needsComputation: true,
+    terrainLayer: 'slope',
+  );
+
+  static const aspectAnalysis = MapSource(
+    id: 'terrain_aspect',
+    name: 'Aspect Analysis',
+    type: MapSourceType.rasterXyz,
+    url: '', // Set dynamically from cache dir at runtime
+    attribution: 'Elevation: AWS Terrain Tiles (Mapzen/USGS)',
+    tileSize: 256,
+    avgTileSizeBytes: 15000,
+    needsComputation: true,
+    terrainLayer: 'aspect',
+  );
+
   /// All available map sources, in display order.
   static const List<MapSource> all = [
     openFreeMap,
     openTopoMap,
     esriWorldImagery,
+    slopeAnalysis,
+    aspectAnalysis,
     trentinoOrthophoto,
     trentinoLidarShading,
   ];
@@ -233,6 +270,34 @@ class MapSource {
         '"source":"raster-tiles",'
         '"minzoom":0,'
         '"maxzoom":19'
+        '}]'
+        '}';
+  }
+
+  /// Build style string for terrain sources, pointing at local file cache.
+  String terrainStyleString(String cacheDir) {
+    assert(needsComputation);
+    final tileUrl =
+        'file://$cacheDir/terrain_analysis/$terrainLayer/{z}/{x}/{y}.png';
+    final escapedAttribution = attribution.replaceAll('"', '\\"');
+    return '{'
+        '"version":8,'
+        '"name":"$name",'
+        '"sources":{'
+        '"raster-tiles":{'
+        '"type":"raster",'
+        '"tiles":["$tileUrl"],'
+        '"tileSize":$tileSize,'
+        '"maxzoom":22,'
+        '"attribution":"$escapedAttribution"'
+        '}'
+        '},'
+        '"layers":[{'
+        '"id":"raster-layer",'
+        '"type":"raster",'
+        '"source":"raster-tiles",'
+        '"minzoom":0,'
+        '"maxzoom":22'
         '}]'
         '}';
   }

@@ -4,8 +4,8 @@ import 'package:alpinenav/models/map_source.dart';
 
 void main() {
   group('MapSource', () {
-    test('all contains exactly 5 sources', () {
-      expect(MapSource.all.length, 5);
+    test('all contains exactly 7 sources', () {
+      expect(MapSource.all.length, 7);
     });
 
     test('byId returns correct source', () {
@@ -74,6 +74,54 @@ void main() {
       for (final source in MapSource.all) {
         expect(source.avgTileSizeBytes, greaterThan(0));
       }
+    });
+  });
+
+  group('Terrain analysis sources', () {
+    test('slopeAnalysis is rasterXyz type', () {
+      expect(MapSource.slopeAnalysis.type, MapSourceType.rasterXyz);
+    });
+
+    test('aspectAnalysis is rasterXyz type', () {
+      expect(MapSource.aspectAnalysis.type, MapSourceType.rasterXyz);
+    });
+
+    test('slopeAnalysis has slope in id', () {
+      expect(MapSource.slopeAnalysis.id, contains('slope'));
+    });
+
+    test('terrain sources are in all list', () {
+      expect(MapSource.all.contains(MapSource.slopeAnalysis), true);
+      expect(MapSource.all.contains(MapSource.aspectAnalysis), true);
+    });
+
+    test('terrain sources need computation flag', () {
+      expect(MapSource.slopeAnalysis.needsComputation, true);
+      expect(MapSource.aspectAnalysis.needsComputation, true);
+      expect(MapSource.openFreeMap.needsComputation, false);
+    });
+
+    test('terrainStyleString produces valid JSON with file:// URL', () {
+      final style = MapSource.slopeAnalysis.terrainStyleString('/data/app');
+      final decoded = jsonDecode(style) as Map<String, dynamic>;
+      expect(decoded['version'], 8);
+      expect(decoded['name'], 'Slope Analysis');
+
+      final sources = decoded['sources'] as Map<String, dynamic>;
+      final raster = sources['raster-tiles'] as Map<String, dynamic>;
+      final tiles = raster['tiles'] as List;
+      expect(tiles.first as String,
+          contains('file:///data/app/terrain_analysis/slope/'));
+    });
+
+    test('aspectAnalysis terrainStyleString uses aspect layer path', () {
+      final style = MapSource.aspectAnalysis.terrainStyleString('/data/app');
+      final decoded = jsonDecode(style) as Map<String, dynamic>;
+      final sources = decoded['sources'] as Map<String, dynamic>;
+      final raster = sources['raster-tiles'] as Map<String, dynamic>;
+      final tiles = raster['tiles'] as List;
+      expect(tiles.first as String,
+          contains('terrain_analysis/aspect/'));
     });
   });
 }
