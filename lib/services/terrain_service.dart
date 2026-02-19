@@ -243,10 +243,20 @@ class TerrainService {
     return rgba;
   }
 
-  /// Colorize aspect with 8-direction compass, blended with hillshade.
+  /// Colorize aspect with a warm/cool scheme, blended with hillshade.
   ///
-  /// N=red, NE=orange, E=yellow, SE=green, S=cyan, SW=blue, W=purple, NW=pink.
-  /// Flat areas (aspect=-1) shown as neutral gray.
+  /// Semantics for the Alps: south-facing = warm (sun, melt risk);
+  /// north-facing = cold (shade, persistent snow, avalanche risk).
+  ///
+  ///   N:   deep blue     — cold, shaded, persistent snow
+  ///   NE:  steel blue    — mostly shaded
+  ///   E:   light blue-grey
+  ///   SE:  warm beige    — morning sun, transitional
+  ///   S:   warm amber    — sunny, high insolation
+  ///   SW:  golden tan    — afternoon sun
+  ///   W:   cool tan      — late sun, drier
+  ///   NW:  muted slate   — mostly shaded
+  ///   Flat: neutral grey
   ///
   /// Returns RGBA Uint8List of length width*height*4.
   static Uint8List colorizeAspect(
@@ -264,32 +274,32 @@ class TerrainService {
 
       int r, g, b;
       if (a < 0) {
-        // Flat — gray
-        r = 160; g = 160; b = 160;
+        // Flat — neutral mid-grey
+        r = 150; g = 150; b = 150;
       } else if (a < 22.5 || a >= 337.5) {
-        // N — red (cold, shady in Alps)
-        r = 215; g = 48; b = 39;
+        // N — deep blue: cold, shaded
+        r = 58; g = 90; b = 148;
       } else if (a < 67.5) {
-        // NE — orange
-        r = 252; g = 141; b = 89;
+        // NE — steel blue: mostly shaded
+        r = 98; g = 138; b = 185;
       } else if (a < 112.5) {
-        // E — yellow
-        r = 254; g = 224; b = 144;
+        // E — light blue-grey: morning light
+        r = 168; g = 195; b = 215;
       } else if (a < 157.5) {
-        // SE — light green
-        r = 145; g = 207; b = 96;
+        // SE — warm beige: transitional
+        r = 215; g = 200; b = 170;
       } else if (a < 202.5) {
-        // S — green (sunny in Alps)
-        r = 26; g = 152; b = 80;
+        // S — warm amber: sunny south-facing
+        r = 220; g = 160; b = 60;
       } else if (a < 247.5) {
-        // SW — teal
-        r = 0; g = 176; b = 185;
+        // SW — golden tan: afternoon sun
+        r = 195; g = 155; b = 90;
       } else if (a < 292.5) {
-        // W — blue
-        r = 69; g = 117; b = 180;
+        // W — cool tan: late sun
+        r = 160; g = 160; b = 130;
       } else {
-        // NW — purple
-        r = 145; g = 80; b = 180;
+        // NW — muted slate: mostly shaded
+        r = 108; g = 120; b = 148;
       }
 
       final blend = 1.0 - hillshadeBlend + hillshadeBlend * hs;

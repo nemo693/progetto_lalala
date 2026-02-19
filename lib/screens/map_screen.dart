@@ -1681,6 +1681,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               ),
             ),
 
+          // ── Terrain legend: bottom-left ──────────────────────
+          // Shifted up when route chip is also visible to avoid overlap.
+          if (_currentMapSource.needsComputation && _styleLoaded)
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom +
+                  (_activeRoute != null ? 100 : 32),
+              left: 12,
+              child: _TerrainLegend(layer: _currentMapSource.terrainLayer!),
+            ),
+
           // ── Location error: top-center ──────────────────────
           if (_locationError != null)
             Positioned(
@@ -1932,6 +1942,136 @@ class _ErrorBanner extends StatelessWidget {
         style: const TextStyle(color: Colors.white, fontSize: 12),
         textAlign: TextAlign.center,
       ),
+    );
+  }
+}
+
+class _TerrainLegend extends StatelessWidget {
+  final String layer; // 'slope' or 'aspect'
+
+  const _TerrainLegend({required this.layer});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: layer == 'slope' ? _buildSlopeLegend() : _buildAspectLegend(),
+    );
+  }
+
+  Widget _buildSlopeLegend() {
+    const entries = [
+      (Color(0xFF4CAF50), '0 – 27°'),
+      (Color(0xFFFFEB3B), '27 – 30°'),
+      (Color(0xFFFF9800), '30 – 35°'),
+      (Color(0xFFF44336), '35 – 45°'),
+      (Color(0xFF8B0000), '> 45°'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          'SLOPE',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 5),
+        for (final (color, label) in entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAspectLegend() {
+    const entries = [
+      (Color(0xFF3A5A94), 'N  — cold/shaded'),
+      (Color(0xFF628AB9), 'NE'),
+      (Color(0xFFA8C3D7), 'E'),
+      (Color(0xFFD7C8AA), 'SE'),
+      (Color(0xFFDCA03C), 'S  — sunny'),
+      (Color(0xFFC39B5A), 'SW'),
+      (Color(0xFFA0A082), 'W'),
+      (Color(0xFF6C7894), 'NW'),
+      (Color(0xFF969696), 'Flat'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          'ASPECT',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 5),
+        for (final (color, label) in entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: _AspectEntry(color: color, label: label),
+          ),
+      ],
+    );
+  }
+}
+
+class _AspectEntry extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _AspectEntry({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 11),
+        ),
+      ],
     );
   }
 }
