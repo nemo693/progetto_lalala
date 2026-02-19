@@ -15,6 +15,7 @@ import '../services/location_service.dart';
 import '../services/gpx_service.dart';
 import '../services/offline_manager.dart';
 import '../services/route_storage_service.dart';
+import '../services/terrain_tile_manager.dart';
 import '../services/wms_tile_server.dart';
 import '../utils/tile_calculator.dart';
 import '../widgets/download_progress_overlay.dart';
@@ -63,6 +64,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   // Show offline region boundaries on the map
   bool _showRegionBoundaries = false;
+
+  // Terrain analysis state
+  bool _isComputingTerrain = false;
+  TerrainProgress? _lastTerrainProgress;
 
   // Resolved style string for WMS sources (needs tile server port).
   // For non-WMS sources this is null and we use source.styleString directly.
@@ -150,6 +155,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _switchMapSource(MapSource source) async {
     if (source.id == _currentMapSource.id) return;
 
+    // Terrain sources need special handling: check cache, maybe compute
+    if (source.needsComputation) {
+      _handleTerrainSource(source);
+      return;
+    }
+
     // For WMS sources, start the tile server and resolve the style
     String? resolvedWmsStyle;
     if (source.type == MapSourceType.wms) {
@@ -167,6 +178,129 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     });
     MapSourcePreference.save(source);
     // Region boundaries are redrawn in _onStyleLoaded after the new style loads
+  }
+
+  // ── Terrain analysis ──────────────────────────────────────────────────
+
+  Future<void> _handleTerrainSource(MapSource source) async {
+    // Get visible bounds from map camera
+    final controller = _mapProvider.controller;
+    if (controller == null) return;
+
+    final region = await controller.getVisibleRegion();
+    final bbox = BoundingBox(
+      minLat: region.southwest.latitude,
+      minLon: region.southwest.longitude,
+      maxLat: region.northeast.latitude,
+      maxLon: region.northeast.longitude,
+    );
+
+    final cacheDir = await TerrainTileManager.getCacheDir();
+    final tiles = TerrainTileManager.enumerateTerrainTiles(bbox);
+
+    // Check if all tiles are cached
+    bool allCached = true;
+    for (final t in tiles) {
+      if (!await TerrainTileManager.isCached(
+          cacheDir, source.terrainLayer!, t.z, t.x, t.y)) {
+        allCached = false;
+        break;
+      }
+    }
+
+    if (allCached && tiles.isNotEmpty) {
+      // Tiles exist — switch directly
+      _applyTerrainStyle(source, cacheDir);
+      return;
+    }
+
+    if (!mounted) return;
+
+    // Show computation dialog
+    final shouldCompute = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2D2D),
+        title: Text('Compute ${source.name}?',
+            style: const TextStyle(color: Colors.white)),
+        content: Text(
+            'This will download elevation data and compute '
+            '${source.terrainLayer} for the visible area '
+            '(${tiles.length} tiles). Requires internet.',
+            style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Compute'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldCompute != true || !mounted) return;
+
+    // Start computation with progress
+    _startTerrainComputation(source, bbox, cacheDir);
+  }
+
+  void _startTerrainComputation(
+      MapSource source, BoundingBox bbox, String cacheDir) {
+    final stream = TerrainTileManager.computeForArea(
+      bbox: bbox,
+      layer: source.terrainLayer!,
+    );
+
+    final broadcastStream = stream.asBroadcastStream();
+
+    setState(() {
+      _isComputingTerrain = true;
+      _lastTerrainProgress = null;
+    });
+
+    broadcastStream.listen(
+      (progress) {
+        if (!mounted) return;
+        setState(() => _lastTerrainProgress = progress);
+        if (progress.isComplete) {
+          setState(() => _isComputingTerrain = false);
+          _applyTerrainStyle(source, cacheDir);
+        }
+      },
+      onError: (e) {
+        if (mounted) {
+          setState(() => _isComputingTerrain = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Terrain computation failed: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  void _applyTerrainStyle(MapSource source, String cacheDir) {
+    final style = source.terrainStyleString(cacheDir);
+    _mapProvider.clearLocationMarkerRefs();
+    _mapProvider.setCurrentSource(source);
+    setState(() {
+      _currentMapSource = source;
+      _wmsResolvedStyle = style; // Reuse the WMS resolved style slot for terrain
+      _styleLoaded = false;
+    });
+    MapSourcePreference.save(source);
+  }
+
+  void _cancelTerrainComputation() {
+    setState(() {
+      _isComputingTerrain = false;
+      _lastTerrainProgress = null;
+    });
   }
 
   Future<void> _initLocation() async {
@@ -665,7 +799,23 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       letterSpacing: 1.2)),
             ),
             ..._availableSources
-                .where((s) => s.type != MapSourceType.wms)
+                .where((s) => s.type != MapSourceType.wms && !s.needsComputation)
+                .map((source) => _buildSourceTile(ctx, source)),
+
+            const Divider(color: Colors.white12),
+
+            // ── Terrain analysis section ──
+            const Padding(
+              padding: EdgeInsets.only(left: 16, bottom: 4),
+              child: Text('TERRAIN ANALYSIS',
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2)),
+            ),
+            ..._availableSources
+                .where((s) => s.needsComputation)
                 .map((source) => _buildSourceTile(ctx, source)),
 
             const Divider(color: Colors.white12),
@@ -1284,7 +1434,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Widget _buildSourceTile(BuildContext ctx, MapSource source) {
     final isActive = source.id == _currentMapSource.id;
     IconData icon;
-    if (source.type == MapSourceType.vector) {
+    if (source.needsComputation) {
+      icon = Icons.landscape;
+    } else if (source.type == MapSourceType.vector) {
       icon = Icons.map;
     } else if (source.type == MapSourceType.wms) {
       icon = Icons.photo_library;
@@ -1514,6 +1666,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 progressStream: _downloadStream!,
                 onCancel: _cancelDownload,
                 onComplete: _onDownloadComplete,
+              ),
+            ),
+
+          // ── Terrain computation progress overlay ───────────
+          if (_isComputingTerrain && _lastTerrainProgress != null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 70,
+              left: 12,
+              right: 68,
+              child: _TerrainProgressOverlay(
+                progress: _lastTerrainProgress!,
+                onCancel: _cancelTerrainComputation,
               ),
             ),
 
@@ -1767,6 +1931,100 @@ class _ErrorBanner extends StatelessWidget {
         message,
         style: const TextStyle(color: Colors.white, fontSize: 12),
         textAlign: TextAlign.center,
+      ),
+    );
+  }
+}
+
+class _TerrainProgressOverlay extends StatelessWidget {
+  final TerrainProgress progress;
+  final VoidCallback onCancel;
+
+  const _TerrainProgressOverlay({
+    required this.progress,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final phaseLabel = switch (progress.phase) {
+      TerrainPhase.downloading => 'Downloading elevation data...',
+      TerrainPhase.computing => 'Computing ${progress.layer}...',
+      TerrainPhase.done => 'Complete',
+      TerrainPhase.error => 'Error: ${progress.error ?? "unknown"}',
+    };
+
+    final pct = (progress.fraction * 100).round();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E).withAlpha(230),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  phaseLabel,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+              Text(
+                '$pct%',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: progress.fraction,
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                progress.phase == TerrainPhase.error
+                    ? Colors.red
+                    : const Color(0xFF4A90D9),
+              ),
+              minHeight: 4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${progress.current}/${progress.total} tiles',
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              GestureDetector(
+                onTap: onCancel,
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
