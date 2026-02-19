@@ -120,7 +120,7 @@ class CustomWmsService {
         wmsCrs: json['wmsCrs'] as String? ?? 'EPSG:3857',
         wmsFormat: json['wmsFormat'] as String? ?? 'image/jpeg',
         attribution: json['attribution'] as String? ?? '',
-        tileSize: json['tileSize'] as int? ?? 256,
+        tileSize: json['tileSize'] as int? ?? 512,
         avgTileSizeBytes: json['avgTileSizeBytes'] as int? ?? 60000,
       );
 }

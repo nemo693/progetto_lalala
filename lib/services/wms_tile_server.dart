@@ -47,6 +47,8 @@ class WmsTileServer {
     await _server?.close(force: true);
     _server = null;
     _port = null;
+    _requestLogCount = 0;
+    _fetchLogCount = 0;
     debugPrint('[WmsTileServer] stopped');
   }
 
@@ -55,6 +57,20 @@ class WmsTileServer {
 
   /// The port the server is listening on, or null if not running.
   static int? get port => _port;
+
+  /// The cache directory path, or null if not yet initialized.
+  /// Used to build `file://` tile URLs for offline mode.
+  static String? get cacheDirPath => _cacheDir?.path;
+
+  /// Ensure the cache directory is initialized (without starting the server).
+  /// Returns the cache directory path.
+  static Future<String> ensureCacheDir() async {
+    if (_cacheDir == null) {
+      final appDir = await getApplicationDocumentsDirectory();
+      _cacheDir = Directory('${appDir.path}/wms_cache');
+    }
+    return _cacheDir!.path;
+  }
 
   /// Delete all cached tiles for a source.
   static Future<void> clearCache(String sourceId) async {
@@ -94,7 +110,13 @@ class WmsTileServer {
 
   // ── Request handling ──────────────────────────────────────────────
 
+  static int _requestLogCount = 0;
   static Future<void> _handleRequest(HttpRequest request) async {
+    // Log the first few requests so we can verify MapLibre is connecting
+    if (_requestLogCount < 5) {
+      _requestLogCount++;
+      debugPrint('[WmsTileServer] request ($_requestLogCount): ${request.uri}');
+    }
     // Expected path: /wms/{sourceId}/{z}/{x}/{y}.jpg
     final segments = request.uri.pathSegments;
     if (segments.length != 5 || segments[0] != 'wms') {
@@ -121,20 +143,26 @@ class WmsTileServer {
 
     // Always try cache first — even if the source isn't registered
     // (e.g. offline mode with previously downloaded tiles)
-    final cached = await _getCachedTile(sourceId, z, x, y);
-    if (cached != null) {
-      request.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType('image', 'jpeg')
-        ..add(cached)
-        ..close();
-      return;
+    try {
+      final cached = await _getCachedTile(sourceId, z, x, y);
+      if (cached != null) {
+        request.response
+          ..statusCode = HttpStatus.ok
+          ..headers.contentType = ContentType('image', 'jpeg')
+          ..add(cached)
+          ..close();
+        return;
+      }
+    } catch (e) {
+      debugPrint('[WmsTileServer] Cache read error for $sourceId/$z/$x/$y: $e');
     }
 
     // Cache miss — try to fetch from WMS if the source is registered
     final source = _sources[sourceId];
     if (source == null) {
       // Source not registered and not in cache — nothing we can do
+      debugPrint('[WmsTileServer] 404: no cache and source "$sourceId" not registered '
+          '(registered: ${_sources.keys.toList()})');
       request.response
         ..statusCode = HttpStatus.notFound
         ..write('Tile not cached and source not registered: $sourceId')
@@ -153,13 +181,33 @@ class WmsTileServer {
         ..add(bytes)
         ..close();
     } else {
-      // Return 404 — MapLibre will show empty tile
+      // Return a 1x1 transparent PNG so MapLibre shows empty tile instead of
+      // retrying aggressively (which floods logs and can stall the server).
+      debugPrint('[WmsTileServer] Tile fetch failed for $sourceId/$z/$x/$y');
       request.response
-        ..statusCode = HttpStatus.notFound
-        ..write('Tile fetch failed')
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType('image', 'png')
+        ..add(_emptyTilePng)
         ..close();
     }
   }
+
+  /// Minimal 1×1 transparent PNG (67 bytes) used as a fallback when a tile
+  /// fetch fails. Returning a valid (empty) image prevents MapLibre from
+  /// retrying the same tile aggressively, which would flood logs and stall
+  /// the server.
+  static final _emptyTilePng = Uint8List.fromList([
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89,
+    0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, // IDAT chunk
+    0x78, 0x9C, 0x62, 0x00, 0x00, 0x00, 0x02, 0x00,
+    0x01, 0xE5, 0x27, 0xDE, 0xFC,
+    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND chunk
+    0xAE, 0x42, 0x60, 0x82,
+  ]);
 
   // ── WMS fetching with retries ─────────────────────────────────────
 
@@ -171,9 +219,15 @@ class WmsTileServer {
 
   /// Fetch a tile from the WMS endpoint with retries.
   /// Public so the offline downloader can use it directly.
+  static int _fetchLogCount = 0;
   static Future<Uint8List?> fetchWmsTile(
       MapSource source, int z, int x, int y) async {
     final url = source.buildWmsGetMapUrl(z, x, y);
+    // Log the first few fetch URLs to help diagnose WMS issues on device
+    if (_fetchLogCount < 3) {
+      _fetchLogCount++;
+      debugPrint('[WmsTileServer] fetchWmsTile URL ($_fetchLogCount): $url');
+    }
     const maxRetries = 3;
     const retryDelays = [
       Duration(seconds: 1),

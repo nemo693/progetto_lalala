@@ -399,7 +399,7 @@ class _WmsSourceDialogState extends State<_WmsSourceDialog> {
   late final TextEditingController _attributionController;
   String _selectedCrs = 'EPSG:3857';
   String _selectedFormat = 'image/jpeg';
-  int _tileSize = 256;
+  int _tileSize = 512;
 
   @override
   void initState() {
@@ -413,7 +413,7 @@ class _WmsSourceDialogState extends State<_WmsSourceDialog> {
         TextEditingController(text: existing?.attribution ?? '');
     _selectedCrs = existing?.wmsCrs ?? 'EPSG:3857';
     _selectedFormat = existing?.wmsFormat ?? 'image/jpeg';
-    _tileSize = existing?.tileSize ?? 256;
+    _tileSize = existing?.tileSize ?? 512;
   }
 
   @override

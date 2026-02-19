@@ -128,9 +128,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       // For WMS sources, start the tile server to resolve the style
       String? resolvedWmsStyle;
       if (source.type == MapSourceType.wms) {
-        final port = await WmsTileServer.start();
-        WmsTileServer.registerSource(source);
-        resolvedWmsStyle = source.wmsStyleString(port);
+        resolvedWmsStyle = await _resolveWmsStyle(source);
       }
       _mapProvider.setCurrentSource(source);
       setState(() {
@@ -153,9 +151,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // For WMS sources, start the tile server and resolve the style
     String? resolvedWmsStyle;
     if (source.type == MapSourceType.wms) {
-      final port = await WmsTileServer.start();
-      WmsTileServer.registerSource(source);
-      resolvedWmsStyle = source.wmsStyleString(port);
+      resolvedWmsStyle = await _resolveWmsStyle(source);
     }
 
     _mapProvider.clearLocationMarkerRefs();
@@ -194,8 +190,46 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       setState(() => _isOnline = _connectivityService.isOnline);
     }
     _connectivitySub = _connectivityService.onlineStream.listen((online) {
-      if (mounted) setState(() => _isOnline = online);
+      if (!mounted) return;
+      final wasOnline = _isOnline;
+      setState(() => _isOnline = online);
+
+      // When connectivity changes and a WMS source is active, swap between
+      // http:// (online, via tile proxy) and file:// (offline, direct cache).
+      // MapLibre Native stops all HTTP requests when Android reports no network,
+      // so offline WMS tiles must be served via file:// to bypass this.
+      if (online != wasOnline && _currentMapSource.type == MapSourceType.wms) {
+        _resolveWmsStyle(_currentMapSource).then((style) {
+          if (mounted) {
+            _mapProvider.clearLocationMarkerRefs();
+            setState(() {
+              _wmsResolvedStyle = style;
+              _styleLoaded = false;
+            });
+          }
+        });
+      }
     });
+  }
+
+  /// Resolve the WMS style for a source, choosing between the HTTP proxy
+  /// (online) and direct file:// cache (offline).
+  ///
+  /// Always starts the tile server and registers the source (needed for online
+  /// browsing and for the offline downloader to populate the cache).
+  Future<String> _resolveWmsStyle(MapSource source) async {
+    assert(source.type == MapSourceType.wms);
+    final port = await WmsTileServer.start();
+    WmsTileServer.registerSource(source);
+
+    if (_connectivityService.isOnline) {
+      return source.wmsStyleString(port);
+    } else {
+      // Offline: use file:// so MapLibre reads cached tiles directly from disk.
+      final cacheDir = await WmsTileServer.ensureCacheDir();
+      debugPrint('[MapScreen] WMS offline mode: using file://$cacheDir/${source.id}/');
+      return source.wmsOfflineStyleString(cacheDir);
+    }
   }
 
   void _onPositionUpdate(Position pos) {
@@ -915,7 +949,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }) {
     final nameController = TextEditingController(text: suggestedName);
     int minZoom = 10;
-    int maxZoom = 15;
+    int maxZoom = 16;
     // Default to current source if it supports offline, otherwise OpenFreeMap
     final initialSource = _currentMapSource.supportsOfflineDownload
         ? _currentMapSource.id
@@ -930,8 +964,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             bounds, minZoom, maxZoom,
           );
           int totalBytes = 0;
+          final customSrcs = customWmsService.customSources;
           for (final srcId in selectedSourceIds) {
-            final src = MapSource.byId(srcId);
+            final src = MapSource.byId(srcId, customSources: customSrcs);
             totalBytes += offlineManager.estimateSize(
               tilesPerSource,
               bytesPerTile: src.avgTileSizeBytes,
@@ -985,8 +1020,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   Slider(
                     value: maxZoom.toDouble(),
                     min: minZoom.toDouble(),
-                    max: 16,
-                    divisions: 16 - minZoom,
+                    max: 20,
+                    divisions: 20 - minZoom,
                     label: '$maxZoom',
                     onChanged: (v) =>
                         setDialogState(() => maxZoom = v.round()),
@@ -1049,7 +1084,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       ],
                     ),
                   ),
-                  if (totalTiles > 10000)
+                  if (totalTiles > 50000)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Very large download! Consider a smaller area or lower max zoom.',
+                        style: TextStyle(
+                            color: Colors.red.shade300, fontSize: 11),
+                      ),
+                    )
+                  else if (totalTiles > 10000)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
@@ -1112,7 +1156,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     // Start foreground service so download survives screen-off / app switch
     await DownloadForegroundService.start();
 
-    final allSources = sourceIds.map((id) => MapSource.byId(id)).toList();
+    final customSources = customWmsService.customSources;
+    final allSources = sourceIds.map((id) => MapSource.byId(id, customSources: customSources)).toList();
     // Split: base map sources use MapLibre native, WMS uses our downloader
     final baseSources =
         allSources.where((s) => s.type != MapSourceType.wms).toList();

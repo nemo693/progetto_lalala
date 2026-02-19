@@ -115,8 +115,21 @@ These are explicitly out of scope but noted for reference:
 - **Distance measurement tool**: Tap two points, show straight-line distance. (~2 hours)
 - **Coordinate format picker**: Currently shows decimal degrees. Add DMS, UTM, MGRS. (~3 hours)
 
+### Slope & Aspect Analysis (Terrain Derivatives)
+
+This is under active exploration. Three options are being considered:
+
+1. **Server-hosted pre-computed tiles**: You compute slope/aspect once offline, host on CDN, users download
+2. **Device-local computation**: User downloads DTM from STEM, device computes slope/aspect on-demand
+3. **Hybrid**: Pre-computed tiles for popular areas, device computation for custom regions
+
+**Decision**: Recommendation is **Option 3 (Hybrid)** — start with pre-computed tiles for Dolomites/key peaks, add device computation later if users need custom areas.
+
+See `TERRAIN_ANALYSIS_EXPLORATION.md` for detailed technical analysis of each approach (storage, performance, UX, implementation effort).
+
+**Potential Phase 4.5 task**: Implement Option 3 Phase 1 (pre-computed only) as a low-effort exploration (~4-6 hours). Provides slope/aspect visualization without complex on-device computation. Good gauge of user interest before committing to device computation (20-30 hours).
+
 ### Other Ideas
-- **Slope analysis**: Compute slope from DTM, shade steep areas (avalanche terrain)
 - **Weather overlay**: Integrate weather radar or forecast data
 - **Multi-day planning**: Link routes into multi-day itineraries
 - **Collaborative routes**: Share routes with a group

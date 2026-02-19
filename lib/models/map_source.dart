@@ -82,6 +82,7 @@ class MapSource {
     return '$wmsBaseUrl$separator'
         'SERVICE=WMS&VERSION=1.1.0&REQUEST=GetMap'
         '&LAYERS=$wmsLayers'
+        '&STYLES='
         '&SRS=$wmsCrs'
         '&BBOX=${bbox.minX},${bbox.minY},${bbox.maxX},${bbox.maxY}'
         '&WIDTH=$tileSize&HEIGHT=$tileSize'
@@ -139,13 +140,13 @@ class MapSource {
     wmsCrs: 'EPSG:3857',
     wmsFormat: 'image/jpeg',
     attribution: '© Provincia Autonoma di Trento',
-    tileSize: 256,
-    avgTileSizeBytes: 80000, // Higher resolution (0.2m) = larger tiles
+    tileSize: 512,
+    avgTileSizeBytes: 200000, // 512px tiles from 0.2m orthophoto = ~200KB each
   );
 
   static const trentinoLidarShading = MapSource(
     id: 'trentino_lidar',
-    name: 'Trentino LiDAR Hillshade',
+    name: 'Trentino LiDAR Hillshade (315°)',
     type: MapSourceType.wms,
     url: '',
     wmsBaseUrl:
@@ -154,8 +155,53 @@ class MapSource {
     wmsCrs: 'EPSG:3857',
     wmsFormat: 'image/jpeg',
     attribution: '© Provincia Autonoma di Trento - LiDAR DTM',
-    tileSize: 256,
-    avgTileSizeBytes: 30000, // Grayscale hillshade = smaller than color orthophoto
+    tileSize: 512,
+    avgTileSizeBytes: 80000, // 512px grayscale hillshade = ~80KB each
+  );
+
+  static const trentinoLidarShading135 = MapSource(
+    id: 'trentino_lidar_135',
+    name: 'Trentino LiDAR Hillshade (135°)',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://siat.provincia.tn.it/geoserver/stem/dtm_135_wg/wms',
+    wmsLayers: 'dtm_135_wg', // DTM hillshade with 135° azimuth (southwest lighting, complementary view)
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© Provincia Autonoma di Trento - LiDAR DTM',
+    tileSize: 512,
+    avgTileSizeBytes: 80000,
+  );
+
+  static const trentinoSurfaceShading = MapSource(
+    id: 'trentino_dsm',
+    name: 'Trentino DSM Hillshade (315°)',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://siat.provincia.tn.it/geoserver/stem/dsm_315_wg/wms',
+    wmsLayers: 'dsm_315_wg', // DSM (Digital Surface Model) includes buildings and vegetation
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© Provincia Autonoma di Trento - LiDAR DSM',
+    tileSize: 512,
+    avgTileSizeBytes: 80000,
+  );
+
+  static const trentinoSurfaceShading135 = MapSource(
+    id: 'trentino_dsm_135',
+    name: 'Trentino DSM Hillshade (135°)',
+    type: MapSourceType.wms,
+    url: '',
+    wmsBaseUrl:
+        'https://siat.provincia.tn.it/geoserver/stem/dsm_135_wg/wms',
+    wmsLayers: 'dsm_135_wg', // DSM with alternate lighting angle
+    wmsCrs: 'EPSG:3857',
+    wmsFormat: 'image/jpeg',
+    attribution: '© Provincia Autonoma di Trento - LiDAR DSM',
+    tileSize: 512,
+    avgTileSizeBytes: 80000,
   );
 
   /// All available map sources, in display order.
@@ -165,6 +211,9 @@ class MapSource {
     esriWorldImagery,
     trentinoOrthophoto,
     trentinoLidarShading,
+    trentinoLidarShading135,
+    trentinoSurfaceShading,
+    trentinoSurfaceShading135,
   ];
 
   /// Look up a source by id. Returns [openFreeMap] if not found.
@@ -212,10 +261,34 @@ class MapSource {
 
   /// Build a MapLibre style string for a WMS source, using the local tile
   /// server at the given [port] to proxy tile requests.
+  ///
+  /// Used when the device is **online** — MapLibre fetches tiles from the
+  /// localhost HTTP proxy, which forwards to the WMS endpoint and caches.
   String wmsStyleString(int port) {
     assert(type == MapSourceType.wms);
     final tileUrl = 'http://127.0.0.1:$port/wms/$id/{z}/{x}/{y}.jpg';
+    return _buildWmsStyle(tileUrl);
+  }
+
+  /// Build a MapLibre style string for a WMS source that reads tiles directly
+  /// from the disk cache via `file://` URLs.
+  ///
+  /// Used when the device is **offline** — MapLibre Native stops making HTTP
+  /// requests (including to localhost) when Android reports no connectivity,
+  /// so we bypass the tile server entirely and point at cached files on disk.
+  String wmsOfflineStyleString(String cacheDirPath) {
+    assert(type == MapSourceType.wms);
+    final tileUrl = 'file://$cacheDirPath/$id/{z}/{x}/{y}.jpg';
+    return _buildWmsStyle(tileUrl);
+  }
+
+  String _buildWmsStyle(String tileUrl) {
     final escapedAttribution = attribution.replaceAll('"', '\\"');
+    // Source maxzoom controls the highest zoom at which MapLibre requests new
+    // tiles.  Beyond this level it over-zooms (stretches) the last fetched tile
+    // instead of going black.  We set it high (22) so the WMS server is queried
+    // up to z22; for zoom levels the server can't serve, the proxy returns a
+    // transparent tile and MapLibre gracefully falls back to the previous zoom.
     return '{'
         '"version":8,'
         '"name":"$name",'
@@ -224,6 +297,7 @@ class MapSource {
         '"type":"raster",'
         '"tiles":["$tileUrl"],'
         '"tileSize":$tileSize,'
+        '"maxzoom":22,'
         '"attribution":"$escapedAttribution"'
         '}'
         '},'
@@ -232,7 +306,7 @@ class MapSource {
         '"type":"raster",'
         '"source":"raster-tiles",'
         '"minzoom":0,'
-        '"maxzoom":19'
+        '"maxzoom":22'
         '}]'
         '}';
   }
@@ -248,6 +322,7 @@ class MapSource {
         '"type":"raster",'
         '"tiles":["$url"],'
         '"tileSize":$tileSize,'
+        '"maxzoom":22,'
         '"attribution":"$escapedAttribution"'
         '}'
         '},'
@@ -256,7 +331,7 @@ class MapSource {
         '"type":"raster",'
         '"source":"raster-tiles",'
         '"minzoom":0,'
-        '"maxzoom":19'
+        '"maxzoom":22'
         '}]'
         '}';
   }

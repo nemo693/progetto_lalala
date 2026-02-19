@@ -97,8 +97,8 @@ void main() {
       expect(url, contains('REQUEST=GetMap'));
       expect(url, contains('LAYERS=ecw-rgb-2015'));
       expect(url, contains('SRS=EPSG:3857'));
-      expect(url, contains('WIDTH=256'));
-      expect(url, contains('HEIGHT=256'));
+      expect(url, contains('WIDTH=512'));
+      expect(url, contains('HEIGHT=512'));
       expect(url, contains('FORMAT=image/jpeg'));
       expect(url, contains('BBOX='));
       expect(url, contains('siat.provincia.tn.it'));
@@ -154,9 +154,9 @@ void main() {
         tiles,
         avgTileSizeBytes: MapSource.trentinoOrthophoto.avgTileSizeBytes,
       );
-      // Roughly 6-600 MB
+      // With 512px tiles at ~200KB each: roughly 20MB - 2GB
       expect(sizeBytes, greaterThan(1024 * 1024));
-      expect(sizeBytes, lessThan(600 * 1024 * 1024));
+      expect(sizeBytes, lessThan(2048 * 1024 * 1024));
     });
   });
 }
